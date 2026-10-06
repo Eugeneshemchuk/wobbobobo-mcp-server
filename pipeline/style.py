@@ -13,8 +13,9 @@ HEX = re.compile(r"#[0-9a-fA-F]{6}")
 TRUE, FALSE = {"1", "true", "on", "yes"}, {"0", "false", "off", "no"}
 CHOICES = {
     "audio": {"ambient", "gen", "bass", "drone", "off"}, "look": {"neon", "pixel", "drift"}, "hook": {"glitch", "shake", "both", "off"},
-    "drift_style": {"classic", "midnight", "ocean", "ember", "neon", "topo"},
-    "drift_target": {"seahorse", "elephant", "bulb"},
+    "drift_style": {"random", "classic", "midnight", "ocean", "ember", "neon", "topo"},
+    "drift_target": {"random", "seahorse", "elephant", "bulb", "seahorse spiral", "tendrils", "classic spiral",
+                     "top spiral", "elephant spirals", "needle spiral", "star"},
     "drift_quality": {"fast", "full"},
     "tts": {"kokoro", "say"},
 }

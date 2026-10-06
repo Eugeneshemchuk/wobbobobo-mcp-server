@@ -1,5 +1,6 @@
 """Cut segments, reframe to 9:16, join, burn captions + quote, normalize loudness."""
 
+import logging
 import math
 import random
 from pathlib import Path
@@ -10,6 +11,8 @@ import drift
 import media
 import style
 from plan import Segment
+
+log = logging.getLogger("render")
 
 W, H, FPS = 1080, 1920, 30
 
@@ -440,8 +443,10 @@ def _render_drift(work: Path, out: Path, duration: float, st: dict, voice: Path 
     bg = work / "drift.mp4"
     if not bg.exists():  # the slow part; kept so a failed encode can resume
         tmp = work / "drift.tmp.mp4"
-        drift.render(tmp, W // 2, H // 2, FPS, duration, st["drift_style"].lower(),
-                     st["drift_target"].lower(), st["drift_speed"], st["drift_quality"].lower())
+        look, target, label = drift.pick(st["drift_style"].lower(), st["drift_target"].lower(), work.parent.name)
+        log.info("%s drift: %s", work.parent.name, label)
+        drift.render(tmp, W // 2, H // 2, FPS, duration, look, target, st["drift_speed"],
+                     st["drift_quality"].lower())
         tmp.rename(bg)
     inputs, labels = _sound_inputs(work, st, duration, voice, first=1)
     graph = ";".join([

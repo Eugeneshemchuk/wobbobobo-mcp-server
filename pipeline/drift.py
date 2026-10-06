@@ -3,8 +3,10 @@ dive into a boundary "river" with slow spin, smooth colouring and the site's sty
 of the page's shader, one process per frame, piped to ffmpeg. float64 is good to ~1e12x zoom.
 """
 
+import colorsys
 import math
 import os
+import random
 import shutil
 import subprocess
 import multiprocessing
@@ -13,13 +15,26 @@ from pathlib import Path
 import numpy as np
 
 TARGETS = {
+    # The page's three. Seahorse valley is a channel between two bulbs, so these open with a lot of
+    # the set's black inside on a portrait frame - pick them by name.
     "seahorse": (-0.743643887037151, 0.131825904205330),
     "elephant": (0.2869318688950451, 0.014286693904085),
     "bulb": (-1.25066, 0.02012),
+    # Checked to be mostly detail from the first frame and to stay detailed down to 100000x.
+    "seahorse spiral": (-0.77568377, 0.13646737),
+    "tendrils": (-0.7746806106269039, -0.1374168856037867),
+    "classic spiral": (-0.761574, -0.0847596),
+    "top spiral": (-0.16070135, 1.0375665),
+    "elephant spirals": (0.42884, -0.231345),
+    "needle spiral": (-1.315180982097868, 0.073481649996795),
+    "star": (-0.5577, 0.6355),
 }
+RANDOM_TARGETS = ["seahorse spiral", "tendrils", "classic spiral", "top spiral", "elephant spirals",
+                  "needle spiral", "star"]
 OVERVIEW = (-0.6, 0.0)
 # Zoom pace at speed 1: e^0.52 = 1.68x per second, ~500x over 12s - the pace of the first drift clips.
 ZOOM_RATE = 0.52
+GLIDE_MAX = (0.18, 0.3)  # max starting offset of the target from the centre, in frame heights
 GLIDE = 0.9  # per second: how fast the target slides from its overview position to the centre
 WARP_FADE = (20, 2000)  # zoom range over which warp eases off, so deep views show the true set
 BG = np.array([0.043, 0.047, 0.059])
@@ -41,6 +56,47 @@ STYLES = {
     "topo": dict(magnify=3, smooth=0, spin=0, cycle=0, density=0.7, warp=0, warp_speed=0.15, bright=True,
                  gradient=[(0, "#f2e8cf"), (0.2, "#a7c957"), (0.4, "#6a994e"), (0.6, "#386641"), (0.8, "#bc4749")]),
 }
+
+
+def _random_gradient(rng: random.Random) -> list:
+    """A new cyclic palette: dark -> two hues from a colour-wheel scheme -> a pale highlight -> dark,
+    like the page's hand-made styles."""
+    h0 = rng.random()
+    spread = {"analogous": (0.08, 0.16), "complementary": (0.5, 0.45), "triadic": (0.33, 0.67),
+              "split": (0.42, 0.58)}[rng.choice(["analogous", "complementary", "triadic", "split"])]
+    h1, h2 = (h0 + spread[0]) % 1, (h0 + spread[1]) % 1
+
+    def hexc(h: float, light: float, sat: float) -> str:
+        r, g, b = colorsys.hls_to_rgb(h, light, sat)
+        return f"#{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
+
+    p1, p2, p3, p4 = rng.uniform(0.18, 0.3), rng.uniform(0.4, 0.5), rng.uniform(0.6, 0.7), rng.uniform(0.82, 0.9)
+    # Lifted darkest stop: the outer region (low counts) shows colour instead of near-black.
+    return [(0, hexc(h0, rng.uniform(0.1, 0.18), 0.7)), (p1, hexc(h0, rng.uniform(0.3, 0.45), 0.85)),
+            (p2, hexc(h1, rng.uniform(0.5, 0.62), 0.9)), (p3, hexc(h2, rng.uniform(0.82, 0.92), 0.5)),
+            (p4, hexc(h2, 0.05, 0.6))]
+
+
+def pick(style_name: str, target_name: str, seed: str) -> tuple[dict, str, str]:
+    """Style and target for a job. "random" draws from the job id - a preset or a freshly generated
+    palette, with spin, density, zoom framing and colour drift varied too - so every clip differs and a
+    retry reproduces the same one. Returns (style, target name, label for the log)."""
+    rng = random.Random(f"drift:{seed}")
+    target = rng.choice(RANDOM_TARGETS) if target_name == "random" else target_name
+    if style_name != "random":
+        return dict(STYLES[style_name]), target, f"{style_name} on {target}"
+    if rng.random() < 0.4:
+        name = rng.choice(list(STYLES))
+        st = dict(STYLES[name])
+    else:
+        name = "generated"
+        st = dict(STYLES["classic"], gradient=_random_gradient(rng))
+    st.update(
+        spin=rng.choice([-1, 1]) * rng.uniform(0.008, 0.03), density=rng.uniform(0.8, 1.6),
+        cycle=rng.choice([0, 0, 0.03, 0.06]), magnify=rng.uniform(1.5, 2.5),
+    )
+    colours = " ".join(c for _, c in st["gradient"]) if st["gradient"] else "site palette"
+    return st, target, f"{name} ({colours}) on {target}, spin {st['spin']:+.3f}, density {st['density']:.2f}"
 
 
 def _hex(c: str) -> np.ndarray:
@@ -92,7 +148,7 @@ def _palette_avg(st: dict) -> np.ndarray:
 
 def _view(sec: float, total: float, st: dict, target: tuple, zoom_end: float) -> dict:
     """Camera at time sec, as the page's frame(): exponential zoom, glide to the centre, spin, warp."""
-    zoom = math.exp(math.log(zoom_end) * sec / total) * st["magnify"]
+    zoom = math.exp(math.log(zoom_end) * sec / total) * st["base"]
     sec *= st["speed"]  # the rest of the motion runs on scaled time too
     glide = math.exp(-GLIDE * sec)
     f = (math.log(zoom) - math.log(WARP_FADE[0])) / math.log(WARP_FADE[1] / WARP_FADE[0])
@@ -100,8 +156,10 @@ def _view(sec: float, total: float, st: dict, target: tuple, zoom_end: float) ->
     warp = st["warp"] * (1 - f * f * (3 - 2 * f))
     return dict(
         zoom=zoom,
-        sx=(target[0] - OVERVIEW[0]) / 2.6 * st["magnify"] * glide,
-        sy=(target[1] - OVERVIEW[1]) / 2.6 * st["magnify"] * glide,
+        # Clamped so the target starts on screen: on a portrait frame the page's full offset puts
+        # elephant/bulb 0.7 heights to the side and the opening is the black inside of the set.
+        sx=max(-GLIDE_MAX[0], min(GLIDE_MAX[0], (target[0] - OVERVIEW[0]) / 2.6 * st["magnify"])) * glide,
+        sy=max(-GLIDE_MAX[1], min(GLIDE_MAX[1], (target[1] - OVERVIEW[1]) / 2.6 * st["magnify"])) * glide,
         angle=st["spin"] * sec,
         max_iter=_max_iter(zoom),
         z0=complex(warp * math.cos(st["warp_speed"] * sec), warp * math.sin(st["warp_speed"] * sec)),
@@ -208,7 +266,10 @@ def _frame(args) -> bytes:
 # keyframe per 2x of zoom, centred on the target at KEY_DENSITY x the frame's pixel density. Each
 # frame resamples the escape counts of its keyframe (spin and glide are just the sampling grid) and
 # is coloured on its own, so colour cycling still works. Warp bends the set over time, so it is off.
-KEY_DENSITY = math.sqrt(2)  # frames range from 1.4x downsampled to 1.4x upsampled from their keyframe
+KEY_DENSITY = 2.0  # frames are 1-2x downsampled from their keyframe, never upsampled - no soft patches
+# Each output pixel averages 2x2 sub-pixel lookups: fine filaments stop shimmering from frame to frame.
+SUBPIXELS = ((-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25))
+BLEND_FROM = 0.75  # last quarter of each zoom octave fades into the next keyframe, so detail never pops
 STRIP = 64  # keyframe rows per task
 
 _keys: dict = {}  # per worker process: keyframe index -> memory-mapped escape counts
@@ -222,7 +283,8 @@ def _key_strip(args) -> np.ndarray:
 
 
 def _sample(key: np.ndarray, px: float, off: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Bilinear lookup weighted by escape, so the set's edge stays clean instead of smearing."""
+    """Bilinear lookup weighted by escape, so the set's edge stays clean instead of smearing.
+    Returns (escape-weighted sum, escape weight 0-1)."""
     ny, nx = key.shape
     u = off.real / px + nx / 2 - 0.5
     v = ny / 2 - off.imag / px - 0.5
@@ -235,22 +297,38 @@ def _sample(key: np.ndarray, px: float, off: np.ndarray) -> tuple[np.ndarray, np
         e = s >= 0
         weight += wt * e
         total += wt * e * s
-    return total / np.maximum(weight, 1e-6), weight > 0.5
+    return total, weight
 
 
 def _key_frame(args) -> bytes:
     w, h, sec, total, st, target, zoom_end, key_dir, meta = args
     v = _view(sec, total, st, target, zoom_end)
     v["z0"] = 0j
-    k = _key_index(v["zoom"], st, meta)
-    if k not in _keys:
-        _keys[k] = np.load(key_dir / f"k{k}.npy", mmap_mode="r")
-    sm, esc = _sample(_keys[k], meta[k]["px"], _offsets(w, h, v).ravel())
-    return _colour(sm, esc, w, h, st, sec, v["max_iter"])
+    k, f = _key_pos(v["zoom"], st, meta)
+    # Both keyframes hold the same function at different resolutions, so escape counts blend cleanly.
+    mix = [(k, 1.0)]
+    if f > BLEND_FROM and k + 1 < len(meta):
+        a = float(_smoothstep(BLEND_FROM, 1.0, f))
+        mix = [(k, 1 - a), (k + 1, a)]
+    ys, xs = np.mgrid[h - 1:-1:-1, 0:w]
+    sm_sum, esc_sum = 0.0, 0.0
+    for dx, dy in SUBPIXELS:
+        off = _offsets(w, h, v, xs + dx, ys + dy).ravel()
+        for key, wt in mix:
+            if key not in _keys:
+                _keys[key] = np.load(key_dir / f"k{key}.npy", mmap_mode="r")
+            t, e = _sample(_keys[key], meta[key]["px"], off)
+            sm_sum, esc_sum = sm_sum + wt * t, esc_sum + wt * e
+    esc_sum = esc_sum / len(SUBPIXELS)
+    sm = sm_sum / len(SUBPIXELS) / np.maximum(esc_sum, 1e-6)
+    return _colour(sm, esc_sum > 0.5, w, h, st, sec, v["max_iter"])
 
 
-def _key_index(zoom: float, st: dict, meta: list) -> int:
-    return min(max(int(math.log2(zoom / st["magnify"]) + 1e-9), 0), len(meta) - 1)
+def _key_pos(zoom: float, st: dict, meta: list) -> tuple[int, float]:
+    """Keyframe index for a zoom, and how far through its octave (0-1) the zoom is."""
+    octave = max(math.log2(zoom / st["base"]), 0.0)
+    k = min(int(octave + 1e-9), len(meta) - 1)
+    return k, octave - k
 
 
 def _keyframes(key_dir: Path, w: int, h: int, fps: int, seconds: float, st: dict, target: tuple,
@@ -261,13 +339,14 @@ def _keyframes(key_dir: Path, w: int, h: int, fps: int, seconds: float, st: dict
     xs, ys = np.array([0, w - 1, 0, w - 1]), np.array([0, 0, h - 1, h - 1])
     for i in range(frames):
         v = _view(i / fps, seconds, st, target, zoom_end)
-        m = meta[_key_index(v["zoom"], st, meta)]
+        k, f = _key_pos(v["zoom"], st, meta)
         corners = _offsets(w, h, v, xs, ys)
-        m["ex"] = max(m["ex"], np.abs(corners.real).max())
-        m["ey"] = max(m["ey"], np.abs(corners.imag).max())
+        for m in [meta[k]] + ([meta[k + 1]] if f > BLEND_FROM and k + 1 < len(meta) else []):
+            m["ex"] = max(m["ex"], np.abs(corners.real).max() + 1 / (h * st["base"] * 2 ** k))
+            m["ey"] = max(m["ey"], np.abs(corners.imag).max() + 1 / (h * st["base"] * 2 ** k))
     tasks = []
     for k, m in enumerate(meta):
-        zoom = st["magnify"] * 2 ** k
+        zoom = st["base"] * 2 ** k
         m["px"] = 2.6 / (zoom * h * KEY_DENSITY)
         m["nx"] = 2 * math.ceil(m["ex"] / m["px"]) + 4
         m["ny"] = 2 * math.ceil(m["ey"] / m["px"]) + 4
@@ -283,12 +362,25 @@ def _keyframes(key_dir: Path, w: int, h: int, fps: int, seconds: float, st: dict
     return meta
 
 
-def render(out: Path, w: int, h: int, fps: int, seconds: float, style_name: str, target: str,
+def _start_zoom(st: dict, target: tuple) -> float:
+    """The page opens on the whole set, which on a portrait frame is mostly the black inside of the
+    set - a weak first second. Probe a coarse frame at doubling zooms and open on the first one where
+    under a quarter of the picture is inside the set."""
+    for start in (1, 2, 4, 8, 16, 32, 64):
+        v = _view(0, 1, {**st, "base": st["magnify"] * start}, target, 1.0)
+        c = complex(*target) + _offsets(54, 96, v)
+        if (_iterate(c.ravel(), 0j, v["max_iter"], v["zoom"]) < 0).mean() < 0.25:
+            return start
+    return 64
+
+
+def render(out: Path, w: int, h: int, fps: int, seconds: float, style: dict, target: str,
            speed: float = 1.0, quality: str = "fast") -> None:
     """Near-lossless intermediate at w x h (ultrafast: x264 would otherwise eat the cores the frames
-    need); the caller upscales and burns captions."""
+    need); the caller upscales and burns captions. style and target come from pick()."""
     # speed scales every motion - zoom, spin, glide, colour cycling, warp; 0 = a still frame.
-    st, tgt = {**STYLES[style_name], "speed": max(speed, 0.0)}, TARGETS[target]
+    st, tgt = {**style, "speed": max(speed, 0.0)}, TARGETS[target]
+    st["base"] = st["magnify"] * _start_zoom(st, tgt)  # opening zoom; glide still uses magnify
     zoom_end = min(math.exp(ZOOM_RATE * st["speed"] * seconds), 1e11)  # float64 limit
     frames = max(1, round(seconds * fps))
     key_dir = out.parent / "drift_keys"

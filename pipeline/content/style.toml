@@ -53,10 +53,12 @@ checker_color = "#1E78C8"
 pixels = true              # blinking pixels top right
 
 # drift look - the Fractal Drift page (eugeneshemchuk.github.io/Portfolio/fractal)
-drift_style = "classic"    # classic | midnight | ocean | ember | neon | topo - the page's styles
-drift_target = "seahorse"  # seahorse | elephant | bulb - where the dive heads
+drift_style = "random"     # random (a new look per clip: a preset or a generated palette, with spin, density,
+                           #   framing and colour drift varied) | classic | midnight | ocean | ember | neon | topo
+drift_target = "random"    # random (one of the detail-rich ones) | seahorse | elephant | bulb | "seahorse spiral"
+                           #   | tendrils | "classic spiral" | "top spiral" | "elephant spirals" | "needle spiral" | star
 drift_speed = 0.8          # motion pace - zoom, spin, glide, colour drift; 1 = ~500x zoom in 12s, 0 = still
-drift_quality = "fast"     # fast: keyframes, ~10x quicker, no warp | full: every frame computed, exact
+drift_quality = "fast"     # fast: anti-aliased keyframes, no warp | full: every frame computed, exact, no AA
 
 # fractal (neon and pixel looks)
 zoom_start = 1.2           # smaller = deeper; the zoom drifts from start to end
