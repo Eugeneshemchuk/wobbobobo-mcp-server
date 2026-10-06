@@ -76,7 +76,7 @@ drone_hz = 110.0
 [voiceover]                # typed text read aloud; voice messages keep your own voice
 voiceover = true
 tts = "kokoro"             # kokoro: open neural voice, runs in the worker | say: macOS voice via tts_host.py
-kokoro_voice = "am_michael"  # male: am_michael am_onyx am_fenrir am_adam am_eric am_liam am_echo am_puck,
+kokoro_voice = "am_onyx"     # male: am_onyx am_michael am_fenrir am_adam am_eric am_liam am_echo am_puck,
                            #   British bm_george bm_lewis bm_daniel bm_fable; female: af_heart af_bella bf_emma ...
 kokoro_speed = 0.8         # 1 = normal; 0.8 = 20% slower
 voice = "Daniel"           # tts=say only: any name from `say -v '?'`
