@@ -1,7 +1,8 @@
 """Deterministic planning - no LLM calls at runtime.
 
 - Segments: keep speech runs, drop leading filler and dead air, fill clips in order up to TARGET_MAX_S.
-- Quote: the user's caption, else the least-recently-used line from content/quotes.txt.
+- Quote: the user's caption, else a one-line summary - the punchiest phrase said in the kept footage -
+  else (no speech) the least-recently-used line from content/quotes.txt.
 - TikTok caption + hashtags: sampled from content/captions.txt and content/hashtags.txt.
 """
 
@@ -24,6 +25,7 @@ class Plan(BaseModel):
     segments: list[Segment]
     quote: str
     quote_author: str | None
+    quote_fit: bool = False  # render on one line, shrinking the font to fit (auto summaries)
     tiktok_caption: str
     hashtags: list[str]
 
@@ -106,6 +108,69 @@ def pick_segments(clips: list[dict]) -> list[Segment]:
     return segments
 
 
+# --- summary ----------------------------------------------------------------
+
+# Words that make a phrase weaker as a headline, on top of FILLERS.
+WEAK = FILLERS | {"just", "really", "basically", "literally", "bro", "gonna", "gotta", "kinda", "stuff", "know"}
+# A headline shouldn't start or end on these.
+EDGE = {"i", "you", "we", "it", "the", "a", "an", "to", "of", "in", "on", "at", "with", "and", "but", "or", "so",
+        "my", "your", "it's", "is", "was", "for", "that", "this"}
+SUMMARY_WORDS = (3, 9)  # min, max words; 6 scores best
+PHRASE_GAP_S = 0.4      # a pause this long also ends a phrase
+
+
+def _phrases(words: list[dict]) -> list[list[dict]]:
+    """Sentences, split further at commas and short pauses; stutters ("just just") collapsed."""
+    out = []
+    for run in _runs(words):
+        cur: list[dict] = []
+        for w in run:
+            if cur and w["start"] - cur[-1]["end"] > PHRASE_GAP_S:
+                out.append(cur)
+                cur = []
+            if cur and _norm(w["w"]) == _norm(cur[-1]["w"]):
+                continue
+            cur.append(w)
+            if w["w"].endswith((",", ";", ":")):
+                out.append(cur)
+                cur = []
+        if cur:
+            out.append(cur)
+    return out
+
+
+def _score(phrase: list[dict]) -> float:
+    words = [_norm(w["w"]) for w in phrase]
+    return (
+        -abs(len(words) - 6)
+        - 1.5 * sum(w in WEAK for w in words)
+        - 2 * (words[0] in EDGE | WEAK)
+        - 2 * (words[-1] in EDGE | WEAK)
+    )
+
+
+def summary_line(clips: list[dict], segments: list[Segment]) -> str | None:
+    """No caption sent: the punchiest phrase actually said in the kept footage, as one on-screen line."""
+    lo, hi = SUMMARY_WORDS
+    best: tuple[float, list[dict]] | None = None
+    for s in segments:
+        words = [w for w in clips[s.clip]["words"] if w["start"] >= s.start and w["end"] <= s.end]
+        for phrase in _phrases(words):
+            # Short phrases as they are; long unpunctuated runs: every window that fits.
+            if len(phrase) <= hi:
+                candidates = [phrase] if len(phrase) >= lo else []
+            else:
+                candidates = [phrase[i:i + n] for n in range(lo, hi + 1) for i in range(len(phrase) - n + 1)]
+            for c in candidates:
+                score = _score(c)
+                if best is None or score > best[0]:  # ties: the earlier phrase wins
+                    best = (score, c)
+    if not best:
+        return None
+    text = " ".join(w["w"] for w in best[1]).rstrip(",;:")
+    return text[0].upper() + text[1:]
+
+
 # --- text content -----------------------------------------------------------
 
 def _lines(name: str) -> list[str]:
@@ -141,16 +206,21 @@ def pick_quote(rng: random.Random) -> tuple[str, str | None]:
 
 def make_plan(clips: list[dict], user_quote: str | None, seed: str = "") -> Plan:
     rng = random.Random(seed or None)
+    segments = pick_segments(clips) if clips else []  # no clips = text-only job
+    fit = False
     if user_quote:
         text, _, author = user_quote.partition("|")
         quote, quote_author = text.strip(), author.strip() or None
+    elif line := summary_line(clips, segments):
+        quote, quote_author, fit = line, None, True
     else:
         quote, quote_author = pick_quote(rng)
     tags = _lines("hashtags.txt")
     return Plan(
-        segments=pick_segments(clips) if clips else [],  # no clips = text-only job
+        segments=segments,
         quote=quote,
         quote_author=quote_author,
+        quote_fit=fit,
         tiktok_caption=rng.choice(_lines("captions.txt")),
         hashtags=tags[:2] + rng.sample(tags[2:], k=min(3, len(tags) - 2)),
     )
