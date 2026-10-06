@@ -96,7 +96,7 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
         words = render.timed_words((job / "text.txt").read_text(), st["pace"])
         card_s = render.card_duration(words)
         duration = card_s + st["fractal_s"]
-        ass = render.build_ass(words, plan.quote, plan.quote_author, duration, st)
+        ass = render.build_ass(words, plan.quote, plan.quote_author, duration, st, look=st["look"])
         tmp = work / "final.tmp.mp4"
         render.render_text(work, ass, tmp, card_s, duration, st)
         tmp.rename(final)

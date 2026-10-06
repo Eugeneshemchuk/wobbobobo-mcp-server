@@ -2,11 +2,17 @@
 
 from pathlib import Path
 
+import config
 import media
 import style
 from plan import Segment
 
 W, H, FPS = 1080, 1920, 30
+
+
+def _ass() -> str:
+    # Fonts dropped into content/fonts are usable by name in style.toml.
+    return f"ass=captions.ass:fontsdir={config.CONTENT_DIR / 'fonts'}"
 
 
 def cut_segments(clip_paths: list[Path], segments: list[Segment], work: Path) -> Path:
@@ -75,8 +81,29 @@ def _chunks(words: list[dict], max_words: int = 3, max_gap: float = 0.6) -> list
     return chunks
 
 
-def build_ass(words: list[dict], quote: str, author: str | None, duration: float, st: dict) -> str:
-    font, highlight = st["font"], style.ass_color(st["highlight"])
+def build_ass(words: list[dict], quote: str, author: str | None, duration: float, st: dict,
+              look: str = "video") -> str:
+    neon = look == "neon"
+    if neon:
+        # Black fill + thin light outline reads as hollow lettering; the glow is a blurred copy underneath.
+        font, fill, highlight = st["neon_font"], "&H00000000&", style.ass_color(st["neon_highlight"])
+        line = style.ass_color(st["neon_line"]).rstrip("&")
+        styles = (
+            f"Style: Caption,{font},{st['caption_size']},&H00000000,&H00000000,{line},&H00000000,"
+            "0,0,0,0,100,100,2,0,1,2,0,5,80,80,0,1\n"
+            f"Style: Quote,{font},{st['quote_size']},&H00000000,&H00000000,{line},&H00000000,"
+            "0,0,0,0,100,100,1,0,1,2,0,8,90,90,240,1"
+        )
+        g = st["glow"]
+        glow = f"{{\\1a&HFF&\\3c{style.ass_color(st['neon_glow'])}\\bord{2 + g // 2}\\blur{g}}}" if g > 0 else ""
+    else:
+        font, fill, highlight, glow = st["font"], "&H00FFFFFF&", style.ass_color(st["highlight"]), ""
+        styles = (
+            f"Style: Caption,{font},{st['caption_size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+            "-1,0,0,0,100,100,0,0,1,7,2,2,80,80,560,1\n"
+            f"Style: Quote,{font},{st['quote_size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+            "-1,0,0,0,100,100,0,0,1,5,2,8,90,90,240,1"
+        )
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -86,25 +113,33 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,{font},{st["caption_size"]},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,2,2,80,80,560,1
-Style: Quote,{font},{st["quote_size"]},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,2,8,90,90,240,1
+{styles}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = []
+
+    def event(layer: int, start: float, end: float, name: str, text: str) -> None:
+        # Separate layers per glow/text pair: libass shifts overlapping events on the same layer.
+        if glow:
+            events.append(f"Dialogue: {layer * 2},{_ts(start)},{_ts(end)},{name},,0,0,0,,{glow}{text}")
+        events.append(f"Dialogue: {layer * 2 + 1},{_ts(start)},{_ts(end)},{name},,0,0,0,,{text}")
+
     quote_text = _esc(quote) + (f"\\N\\N- {_esc(author)}" if author else "")
-    events.append(f"Dialogue: 1,{_ts(0)},{_ts(duration)},Quote,,0,0,0,,{{\\fad(300,300)}}{quote_text}")
+    event(1, 0, duration, "Quote", f"{{\\fad(300,300)}}{quote_text}")
+    # Blackletter capitals are unreadable, so the neon look keeps the words as typed.
+    case = (lambda w: w) if neon else str.upper
 
     for chunk in _chunks(words, max_words=max(1, st["words_per_line"])):
         for i, w in enumerate(chunk):
             start = w["start"]
             end = chunk[i + 1]["start"] if i + 1 < len(chunk) else w["end"]
             text = " ".join(
-                (f"{{\\c{highlight}}}{_esc(c['w'].upper())}{{\\c&H00FFFFFF&}}" if j == i else _esc(c["w"].upper()))
+                (f"{{\\c{highlight}}}{_esc(case(c['w']))}{{\\c{fill}}}" if j == i else _esc(case(c["w"])))
                 for j, c in enumerate(chunk)
             )
-            events.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Caption,,0,0,0,,{text}")
+            event(0, start, end, "Caption", text)
     return header + "\n".join(events) + "\n"
 
 
@@ -114,29 +149,47 @@ FRACTAL_OPACITY = [0.0, 0.08, 0.15, 0.22, 0.30, 0.38, 0.46, 0.55]
 MIRROR = f"crop={W // 2}:{H}:0:0,split[l][r];[r]hflip[rf];[l][rf]hstack"  # left half + its mirror image
 
 
-def _mandelbrot(seconds: float, zoom_start: float, zoom_end: float, detail: int) -> str:
-    # Low-res (cheap on CPU) and scaled up; drifts along the seahorse valley. end_pts counts frames.
+UPSCALE = f"scale={W}:{H},setsar=1"
+
+
+def _mandelbrot(seconds: float, zoom_start: float, zoom_end: float, detail: int, inner: str = "mincol") -> str:
+    # Half-res (cheap on CPU) - callers add UPSCALE; drifts along the seahorse valley. end_pts counts frames.
     return (
-        f"mandelbrot=size={W // 2}x{H // 2}:rate={FPS}:maxiter={detail}"
+        f"mandelbrot=size={W // 2}x{H // 2}:rate={FPS}:maxiter={detail}:inner={inner}"
         f":start_scale={zoom_start}:end_scale={zoom_end}:end_pts={max(seconds, 1) * FPS:.0f}"
-        f",scale={W}:{H},setsar=1"
     )
+
+
+def _gradient_map(colors: list[str]) -> str:
+    """Recolour by brightness: dark -> bright mapped through the palette."""
+    stops = [style.rgb(c) for c in colors]
+    n = len(stops) - 1
+
+    def channel(c: int) -> str:
+        expr = str(stops[-1][c])
+        for i in reversed(range(n)):
+            a, b = stops[i][c], stops[i + 1][c]
+            lo, hi = 255 * i / n, 255 * (i + 1) / n
+            expr = f"if(lt(val,{hi:.1f}),{a}+({b - a})*(val-{lo:.1f})/{hi - lo:.1f},{expr})"
+        return f"'{expr}'"
+
+    return f"format=gray,format=gbrp,lutrgb=r={channel(0)}:g={channel(1)}:b={channel(2)}"
 
 
 def video_filter(st: dict, duration: float) -> str:
     level = max(0, min(7, st["fractal"]))
     if level == 0:
-        return "[0:v]ass=captions.ass[v]"
+        return f"[0:v]{_ass()}[v]"
     base = "[0:v]"
     if level >= 5:
         base += MIRROR + ","
     if level >= 7:
         base += "hue=H=2*PI*t/8,"
     base += "format=gbrp[base]"
-    fractal = _mandelbrot(duration, st["overlay_zoom_start"], st["overlay_zoom_end"], 256) + ",format=gbrp[fr]"
+    fractal = _mandelbrot(duration, st["overlay_zoom_start"], st["overlay_zoom_end"], 256) + f",{UPSCALE},format=gbrp[fr]"
     blend = (
         f"[base][fr]blend=all_mode=screen:all_opacity={FRACTAL_OPACITY[level]}:shortest=1,"
-        "format=yuv420p,ass=captions.ass[v]"
+        f"format=yuv420p,{_ass()}[v]"
     )
     return ";".join([base, fractal, blend])
 
@@ -155,7 +208,7 @@ def finalize(joined: Path, ass: str, out: Path, st: dict, duration: float = 0) -
     ], cwd=work)
 
 
-# --- text-only: hook card -> fractal zoom, no footage --------------------------
+# --- text-only: hook card -> fractal zoom, no footage. look = neon | pixel -------
 
 LEAD_S, TAIL_S = 0.3, 0.4  # pause before the first hook word / after the last
 
@@ -198,28 +251,53 @@ def _card(d: float, st: dict) -> str:
     )
 
 
+def _synth(freq: str, phase: str) -> str:
+    """The one voice: sine + fifth + octave."""
+    return f"sin(2*PI*{freq}*{phase})+0.4*sin(3*PI*{freq}*{phase})+0.2*sin(4*PI*{freq}*{phase})"
+
+
+def _audio(st: dict, duration: float) -> str:
+    """TikTok wants an audio track; a TikTok sound can still be added in-app."""
+    mode = st["audio"].lower()
+    if mode == "off":
+        return f"anullsrc=r=48000:cl=stereo,atrim=duration={duration}[a]"
+    if mode == "drone":  # held note with a slow swell
+        expr = f"0.3*(0.8+0.2*sin(2*PI*0.25*t))*({_synth(st['drone_hz'], 't')})"
+    else:  # bass: one plucked note per beat, looping through bass_notes
+        beat = 60 / st["bpm"]
+        notes = [style.note_hz(n) for n in st["bass_notes"].split()]
+        freq = str(notes[-1])
+        for i, hz in reversed(list(enumerate(notes[:-1]))):
+            freq = f"if(eq(mod(floor(t/{beat}),{len(notes)}),{i}),{hz},{freq})"
+        # st/ld: 0 = time since the beat, 1 = note frequency. Restarting the phase per note avoids clicks.
+        expr = (
+            f"st(0,mod(t,{beat}));st(1,{freq});"
+            f"0.3*(1-exp(-60*ld(0)))*exp(-3*ld(0)/{beat})*({_synth('ld(1)', 'ld(0)')})"
+        )
+    return (
+        f"aevalsrc='{expr}':s=48000:c=stereo:d={duration},afade=t=in:d=0.05,"
+        f"afade=t=out:st={max(0, duration - 0.8):.2f}:d=0.8,loudnorm=I=-14:TP=-1.5:LRA=11[a]"
+    )
+
+
 def render_text(work: Path, ass: str, out: Path, card_s: float, duration: float, st: dict) -> None:
     fractal_s = round(duration - card_s, 2)
     (work / "captions.ass").write_text(ass, encoding="utf-8")
-    fractal = _mandelbrot(fractal_s, st["zoom_start"], st["zoom_end"], st["detail"]) + f",trim=duration={fractal_s}"
+    neon = st["look"] == "neon"
+    fractal = _mandelbrot(fractal_s, st["zoom_start"], st["zoom_end"], st["detail"], "black" if neon else "mincol")
+    fractal += f",trim=duration={fractal_s}"
+    if neon:
+        fractal += "," + _gradient_map(st["neon_palette"].split())
+        if st["bloom"] > 0:  # soft glow: a blurred copy screened back on top
+            fractal += f",split[fa][fb];[fb]gblur=sigma=10[fbb];[fa][fbb]blend=all_mode=screen:all_opacity={st['bloom']}"
+    fractal += f",{UPSCALE}"
     if st["mirror"]:
         fractal += "," + MIRROR
     if st["hue_cycle_s"] > 0:
         fractal += f",hue=H=2*PI*t/{st['hue_cycle_s']}"
     fractal += ",format=yuv420p[fr]"
-    if st["drone"]:
-        # Low drone with a slow swell - TikTok wants an audio track; add a TikTok sound in-app if wanted.
-        hz = st["drone_hz"]
-        audio = (
-            f"aevalsrc='0.3*sin(2*PI*{hz}*t)*(0.8+0.2*sin(2*PI*0.25*t))+0.12*sin(2*PI*{hz * 1.5}*t)"
-            f"+0.06*sin(2*PI*{hz * 2}*t)':s=48000:c=stereo:d={duration},afade=t=in:d=0.5,"
-            f"afade=t=out:st={max(0, duration - 0.8):.2f}:d=0.8,loudnorm=I=-14:TP=-1.5:LRA=11[a]"
-        )
-    else:
-        audio = f"anullsrc=r=48000:cl=stereo,atrim=duration={duration}[a]"
-    graph = ";".join([
-        _card(card_s, st), fractal, "[card][fr]concat=n=2:v=1:a=0,ass=captions.ass[v]", audio,
-    ])
+    card = f"color=c=black:s={W}x{H}:r={FPS}:d={card_s},format=yuv420p[card]" if neon else _card(card_s, st)
+    graph = ";".join([card, fractal, f"[card][fr]concat=n=2:v=1:a=0,{_ass()}[v]", _audio(st, duration)])
     media.run([
         "ffmpeg", "-y", "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",

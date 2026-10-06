@@ -9,6 +9,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "./data")).resolve()
 JOBS_DIR = DATA_DIR / "jobs"
 TOKENS_FILE = DATA_DIR / "tiktok_tokens.json"
 QUOTES_USED_FILE = DATA_DIR / "quotes_used.log"
+LOG_FILE = DATA_DIR / "bot.log"  # compact, rotates at 1MB (2 backups)
 
 # Pre-written quotes, captions, hashtags - edit these files, no LLM at runtime.
 CONTENT_DIR = Path(os.environ.get("CONTENT_DIR", Path(__file__).parent / "content")).resolve()

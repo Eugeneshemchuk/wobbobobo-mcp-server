@@ -19,10 +19,20 @@ overlay_zoom_start = 3.0   # zoom over the clip: smaller = deeper
 overlay_zoom_end = 0.02
 
 [text]                     # text-only clips (no video)
+look = "neon"              # neon (black blackletter card, neon fractal) | pixel (yellow/blue pixel card)
 pace = 0.4                 # seconds per hook word
 fractal_s = 5.5            # seconds of fractal after the title card
 
-# title card
+# neon look
+neon_font = "UnifrakturMaguntia"   # any font in content/fonts or the image; blackletter stays in mixed case
+neon_line = "#FFFFFF"      # outline of the hollow lettering
+neon_glow = "#8C3CFF"      # glow around the lettering
+neon_highlight = "#BEFF28" # fill of the current word
+glow = 10                  # glow blur, 0 = off
+neon_palette = "#000000 #3A0CA3 #8C3CFF #FF4FD8 #BEFF28"  # fractal recolour, dark -> bright
+bloom = 0.35               # soft glow on the fractal, 0 - 1
+
+# pixel look
 card_left = "#FFFF00"
 card_right = "#0000FF"
 line = true                # rising diagonal line
@@ -39,6 +49,8 @@ detail = 256               # max iterations: higher = finer edges, slower render
 mirror = false             # kaleidoscope symmetry
 hue_cycle_s = 0.0          # seconds per full colour cycle, 0 = off
 
-# audio
-drone = true               # off = silent track
+# audio - one synth (sine + fifth + octave), played as a bassline or a held drone
+audio = "bass"             # bass | drone | off
+bass_notes = "A1"          # one note per beat, loops; e.g. bass_notes="A1 A1 C2 G1"
+bpm = 60
 drone_hz = 110.0
