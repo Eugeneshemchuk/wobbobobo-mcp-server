@@ -1,7 +1,8 @@
 """Telegram front door. Send one video (or an album of videos) with an optional
 caption = the quote. The bot renders it and drops it into your TikTok inbox.
-Or send plain text (no video): it becomes the hook on a title card, then a fractal zoom.
-Add a line "quote: ..." to set the quote; otherwise one comes from content/quotes.txt.
+Or send plain text (no video): it is read aloud as the hook over a fractal background.
+Add a line "quote: ..." to show a quote on top. Or send a voice message: it is transcribed and
+used as the hook text (flags go in its caption).
 key=value flags anywhere in the text or caption override content/style.toml for that job
 (e.g. "fractal=5", "pace=0.3 hue_cycle_s=4") and are stripped from the captions.
 
@@ -105,6 +106,26 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     (job / "status").write_text("ingested")
     await msg.reply_text(f"Job {job.name}: text-only, queued.")
     log.info("%s queued: text words=%d quote=%s flags=%s", job.name, len(hook.split()), bool(quote), flags or "-")
+    await queue.put(job)
+
+
+async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    try:
+        caption, flags = style.extract_flags(msg.caption or "")
+    except ValueError as e:
+        await msg.reply_text(f"{e}\nNothing queued - fix and resend.")
+        log.info("rejected voice: %s", str(e).split(".")[0])
+        return
+    job = _new_job_dir()
+    style.save_flags(job, flags)
+    tg_file = await context.bot.get_file((msg.voice or msg.audio).file_id)
+    await tg_file.download_to_drive(job / "voice.audio")  # transcribed into text.txt by the pipeline
+    if quote := " ".join(caption.split()):
+        (job / "quote.txt").write_text(quote)
+    (job / "status").write_text("ingested")
+    await msg.reply_text(f"Job {job.name}: voice -> text, queued.")
+    log.info("%s queued: voice quote=%s flags=%s", job.name, bool(quote), flags or "-")
     await queue.put(job)
 
 
@@ -224,6 +245,7 @@ def main() -> None:
     only_me = filters.Chat(chat_id=config.TELEGRAM_ALLOWED_CHAT_ID)
     app.add_handler(MessageHandler(only_me & (filters.VIDEO | filters.Document.VIDEO), on_video))
     app.add_handler(MessageHandler(only_me & filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(MessageHandler(only_me & (filters.VOICE | filters.AUDIO), on_voice))
     app.add_handler(CommandHandler("retry", on_retry, filters=only_me))
     app.add_handler(CommandHandler("jobs", on_jobs, filters=only_me))
     app.run_polling()

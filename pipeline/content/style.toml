@@ -25,10 +25,12 @@ overlay_zoom_start = 3.0   # zoom over the clip: smaller = deeper
 overlay_zoom_end = 0.02
 
 [text]                     # text-only clips (no video)
-look = "neon"              # neon (black blackletter card, neon fractal) | pixel (yellow/blue pixel card)
-pace = 0.4                 # seconds per hook word
+look = "drift"             # neon (black blackletter card, neon fractal) | pixel (yellow/blue pixel card)
+                           # | drift (hook text over a Fractal Drift dive from the first frame)
+pace = 0.4                 # seconds per hook word (without voiceover; with it, the voice sets the pace)
 fractal_s = 4.5            # minimum seconds of fractal after the title card
 loop_align = true          # with the bassline: stretch to end on a whole bass loop (8s or 12s at 60 bpm)
+max_mb = 10.0              # final file size cap for text and voice clips; the bitrate follows from the length
 
 # neon look
 neon_font = "UnifrakturMaguntia"   # any font in content/fonts or the image; blackletter stays in mixed case
@@ -50,15 +52,29 @@ checker = true             # checker strip on the right edge
 checker_color = "#1E78C8"
 pixels = true              # blinking pixels top right
 
-# fractal
+# drift look - the Fractal Drift page (eugeneshemchuk.github.io/Portfolio/fractal)
+drift_style = "classic"    # classic | midnight | ocean | ember | neon | topo - the page's styles
+drift_target = "seahorse"  # seahorse | elephant | bulb - where the dive heads
+drift_speed = 0.8          # motion pace - zoom, spin, glide, colour drift; 1 = ~500x zoom in 12s, 0 = still
+drift_quality = "fast"     # fast: keyframes, ~10x quicker, no warp | full: every frame computed, exact
+
+# fractal (neon and pixel looks)
 zoom_start = 1.2           # smaller = deeper; the zoom drifts from start to end
 zoom_end = 0.6
 detail = 256               # max iterations: higher = finer edges, slower render
 mirror = false             # kaleidoscope symmetry
 hue_cycle_s = 0.0          # seconds per full colour cycle, 0 = off
 
-# audio - one synth (sine + fifth + octave), played as a bassline or a held drone
-audio = "bass"             # bass | drone | off
-bass_notes = "A1"          # one note per beat, loops; e.g. bass_notes="A1 A1 C2 G1"
-bpm = 60
+# audio - a new track per clip by default: TikTok flagged the same bassline on every upload
+audio = "ambient"          # ambient: meditative MIDI bed - pad drone, slow chords, bells, reverb, binaural sub
+                           # | gen: synth bassline + arpeggio | bass: bass_notes | drone | off
+sub_level = 0.15           # ambient: deep sine sub under the bed, 0 = off
+bass_notes = "A1"          # audio=bass only: one note per beat, loops; e.g. bass_notes="A1 A1 C2 G1"
+bpm = 60                   # audio=bass only; gen picks 72-104
 drone_hz = 110.0
+
+[voiceover]                # text and voice prompts read aloud by a macOS voice; captions follow the speech
+voiceover = true           # needs tts_host.py running on the Mac
+voice = "Daniel"           # any name from `say -v '?'`; Premium voices sound far more natural
+voice_rate = 125           # say -r; 125 is 20% slower than the default 175 (say keeps pauses fixed, so not linear)
+music_level = 0.25         # music volume under the voice, 0 - 1
