@@ -193,11 +193,14 @@ def _hook(src: str, dst: str, st: dict, duration: float) -> str:
     fx = []
     if mode in ("shake", "both"):
         amp = round(40 * a)
-        pad = amp + 8  # oversize by the max offset so the crop never leaves the frame
+        # Zoom in just enough that the crop never leaves the frame - uniformly, so faces aren't stretched.
+        zoom = 1 + 2 * (amp + 8) / W
+        sw, sh = 2 * round(W * zoom / 2), 2 * round(H * zoom / 2)
+        cx, cy = (sw - W) // 2, (sh - H) // 2
         decay = f"max(0,1-t/{d})"
         fx.append(
-            f"scale={W + 2 * pad}:{H + 2 * pad},crop={W}:{H}"
-            f":x='{pad}+{amp}*sin(97*t)*cos(41*t)*{decay}':y='{pad}+{amp}*cos(83*t)*sin(53*t)*{decay}'"
+            f"scale={sw}:{sh},crop={W}:{H}"
+            f":x='{cx}+{amp}*sin(97*t)*cos(41*t)*{decay}':y='{cy}+{amp}*cos(83*t)*sin(53*t)*{decay}'"
         )
     if mode in ("glitch", "both"):
         # Random-looking 48px bands slide sideways, channels split, grain, one negative frame.
@@ -245,7 +248,9 @@ def finalize(joined: Path, ass: str, out: Path, st: dict, duration: float = 0) -
         "-filter_complex", video_filter(st, duration),
         "-map", "[v]", "-map", "0:a",
         "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+        # -r: constant 30fps output whatever the graph's timebase - trim/concat leaves microsecond
+        # timestamps, which made x264 pick H.264 level 6.2 and phones then dropped the video track.
+        "-r", str(FPS), "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart",
         str(out.resolve()),
     ], cwd=work)
@@ -358,7 +363,9 @@ def render_text(work: Path, ass: str, out: Path, card_s: float, duration: float,
     ])
     media.run([
         "ffmpeg", "-y", "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+        # -r: constant 30fps output whatever the graph's timebase - trim/concat leaves microsecond
+        # timestamps, which made x264 pick H.264 level 6.2 and phones then dropped the video track.
+        "-r", str(FPS), "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart",
         str(out.resolve()),
     ], cwd=work)

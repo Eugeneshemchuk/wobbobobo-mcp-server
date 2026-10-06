@@ -24,6 +24,7 @@ import cleanup
 import config
 import logs
 import pipeline
+import render
 import style
 
 log = logging.getLogger("bot")
@@ -146,8 +147,10 @@ async def worker(app: Application) -> None:
             plan = pipeline.Plan.model_validate_json((job / "plan.json").read_text())
             tags = " ".join(f"#{t.lstrip('#')}" for t in plan.hashtags)
             with final.open("rb") as f:
+                # Explicit size: otherwise Telegram guesses and the preview can look squashed.
                 await app.bot.send_video(
-                    chat, f, supports_streaming=True,
+                    chat, f, supports_streaming=True, width=render.W, height=render.H,
+                    duration=round(pipeline.media.probe(final)["duration"]),
                     caption=f"Caption to paste in TikTok:\n\n{plan.tiktok_caption}\n{tags}"[:1024],
                 )
             if not pipeline.tiktok.connected():
