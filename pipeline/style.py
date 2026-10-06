@@ -11,6 +11,9 @@ import config
 FLAG = re.compile(r'(?<!\S)([a-z_]+)=(?:"([^"]*)"|(\S+))(?!\S)', re.IGNORECASE)
 HEX = re.compile(r"#[0-9a-fA-F]{6}")
 TRUE, FALSE = {"1", "true", "on", "yes"}, {"0", "false", "off", "no"}
+CHOICES = {"audio": {"bass", "drone", "off"}, "look": {"neon", "pixel"}}
+NOTE = re.compile(r"([A-G])([#b]?)(-?\d)")
+SEMITONE = {"C": -9, "D": -7, "E": -5, "F": -4, "G": -2, "A": 0, "B": 2}
 
 
 def defaults() -> dict:
@@ -21,7 +24,17 @@ def defaults() -> dict:
     return flat
 
 
-def _coerce(raw: str, default):
+def note_hz(name: str) -> float:
+    """Scientific pitch ("A1", "C#2", "Bb0") -> Hz, A4 = 440."""
+    m = NOTE.fullmatch(name)
+    if not m:
+        raise ValueError(f"not a note: {name}")
+    letter, acc, octave = m.groups()
+    semis = SEMITONE[letter] + {"#": 1, "b": -1, "": 0}[acc] + (int(octave) - 4) * 12
+    return round(440 * 2 ** (semis / 12), 3)
+
+
+def _coerce(raw: str, default, key: str = ""):
     if isinstance(default, bool):
         if raw.lower() not in TRUE | FALSE:
             raise ValueError("expected on/off")
@@ -33,6 +46,17 @@ def _coerce(raw: str, default):
             return float(raw)
     except ValueError:
         raise ValueError("expected a whole number" if isinstance(default, int) else "expected a number") from None
+    if key in CHOICES and raw.lower() not in CHOICES[key]:
+        raise ValueError(f"expected one of {', '.join(sorted(CHOICES[key]))}")
+    if key == "bass_notes":
+        for n in raw.split():
+            note_hz(n)
+        if not raw.split():
+            raise ValueError("expected notes like A1 C2")
+    if key.endswith("_palette"):
+        if len(raw.split()) < 2 or not all(HEX.fullmatch(c) for c in raw.split()):
+            raise ValueError('expected 2+ colours like "#000000 #8C3CFF #BEFF28"')
+        return raw
     if isinstance(default, str) and default.startswith("#") and not HEX.fullmatch(raw):
         raise ValueError("expected a colour like #FFE500")
     return raw.replace(",", " ")  # commas would break the ASS style line
@@ -47,7 +71,7 @@ def extract_flags(text: str) -> tuple[str, dict]:
         if key not in base:
             raise ValueError(f"Unknown flag {key}=. Known: {', '.join(sorted(base))}")
         try:
-            flags[key] = _coerce(raw, base[key])
+            flags[key] = _coerce(raw, base[key], key)
         except ValueError as e:
             raise ValueError(f"Bad value for {key}: {raw} ({e})") from None
     return FLAG.sub("", text), flags

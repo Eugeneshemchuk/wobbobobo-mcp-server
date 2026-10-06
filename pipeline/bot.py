@@ -22,6 +22,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 import cleanup
 import config
+import logs
 import pipeline
 import style
 
@@ -47,6 +48,7 @@ async def _ingest(messages: list[Message], context: ContextTypes.DEFAULT_TYPE) -
         caption, flags = style.extract_flags(caption)
     except ValueError as e:
         await messages[0].reply_text(f"{e}\nNothing queued - fix and resend.")
+        log.info("rejected video: %s", str(e).split(".")[0])
         return
     job = _new_job_dir()
     style.save_flags(job, flags)
@@ -59,6 +61,7 @@ async def _ingest(messages: list[Message], context: ContextTypes.DEFAULT_TYPE) -
         (job / "quote.txt").write_text(caption)
     (job / "status").write_text("ingested")
     await messages[0].reply_text(f"Job {job.name}: {len(messages)} clip(s), queued.")
+    log.info("%s queued: video clips=%d quote=%s flags=%s", job.name, len(messages), bool(caption), flags or "-")
     await queue.put(job)
 
 
@@ -84,6 +87,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text, flags = style.extract_flags(msg.text)
     except ValueError as e:
         await msg.reply_text(f"{e}\nNothing queued - fix and resend.")
+        log.info("rejected text: %s", str(e).split(".")[0])
         return
     quote = None
     if m := QUOTE_LINE.search(text):
@@ -99,6 +103,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         (job / "quote.txt").write_text(quote)
     (job / "status").write_text("ingested")
     await msg.reply_text(f"Job {job.name}: text-only, queued.")
+    log.info("%s queued: text words=%d quote=%s flags=%s", job.name, len(hook.split()), bool(quote), flags or "-")
     await queue.put(job)
 
 
@@ -111,6 +116,7 @@ async def on_retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("No such job.")
         return
     await queue.put(job)
+    log.info("%s re-queued", job.name)
     await update.effective_message.reply_text(f"Job {job.name} re-queued.")
 
 
@@ -127,12 +133,16 @@ async def worker(app: Application) -> None:
 
     while True:
         job = await queue.get()
+        started = time.monotonic()
 
         def notify(text: str, job=job) -> None:
+            log.info("%s %s", job.name, text.rstrip("."))
             asyncio.run_coroutine_threadsafe(app.bot.send_message(chat, f"[{job.name}] {text}"), loop)
 
         try:
             final = await asyncio.to_thread(pipeline.process, job, notify)
+            log.info("%s rendered in %.0fs: %.1fs, %.1fMB", job.name, time.monotonic() - started,
+                     pipeline.media.probe(final)["duration"], final.stat().st_size / 1e6)
             plan = pipeline.Plan.model_validate_json((job / "plan.json").read_text())
             tags = " ".join(f"#{t.lstrip('#')}" for t in plan.hashtags)
             with final.open("rb") as f:
@@ -144,15 +154,17 @@ async def worker(app: Application) -> None:
                 await app.bot.send_message(chat, f"[{job.name}] TikTok not connected yet - skipped the upload. "
                                                  f"After connecting, /retry {job.name} uploads it.")
                 (job / "status").write_text("rendered")
+                log.info("%s TikTok not connected - upload skipped", job.name)
                 continue
             result = await asyncio.to_thread(pipeline.publish, job, notify)
+            log.info("%s in TikTok inbox: %s", job.name, result["status"])
             await app.bot.send_message(
                 chat,
                 f"[{job.name}] In your TikTok inbox ({result['status']}). "
                 "Open TikTok -> inbox notification -> finish and post.",
             )
         except Exception as e:  # noqa: BLE001 - surface every failure to Telegram
-            log.exception("job %s failed", job.name)
+            log.exception("%s failed after %.0fs", job.name, time.monotonic() - started)
             (job / "status").write_text(f"failed: {type(e).__name__}")
             await app.bot.send_message(chat, f"[{job.name}] FAILED: {e}\n\nFix and /retry {job.name}"[:4000])
         finally:
@@ -180,11 +192,17 @@ async def _post_init(app: Application) -> None:
     _tasks.extend([asyncio.create_task(worker(app)), asyncio.create_task(cleanup_loop())])
 
 
+async def _post_shutdown(app: Application) -> None:
+    for t in _tasks:
+        t.cancel()
+    await asyncio.gather(*_tasks, return_exceptions=True)
+    log.info("bot stopped")
+
+
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    # httpx logs every request URL at INFO, and Telegram URLs contain the bot token.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logs.setup()
     config.JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    log.info("bot started")
 
     builder = (
         Application.builder()
@@ -193,6 +211,7 @@ def main() -> None:
         .read_timeout(300)
         .write_timeout(300)
         .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
     )
     if config.TELEGRAM_API_BASE:
         base = config.TELEGRAM_API_BASE.rstrip("/")
