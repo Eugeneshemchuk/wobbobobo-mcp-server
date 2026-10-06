@@ -1,5 +1,6 @@
 """Cut segments, reframe to 9:16, join, burn captions + quote, normalize loudness."""
 
+import math
 from pathlib import Path
 
 import config
@@ -82,15 +83,17 @@ def _chunks(words: list[dict], max_words: int = 3, max_gap: float = 0.6) -> list
 
 
 def build_ass(words: list[dict], quote: str, author: str | None, duration: float, st: dict,
-              look: str = "video") -> str:
+              look: str = "video", quote_fit: bool = False) -> str:
     neon = look == "neon"
+    # Captions sit bottom-aligned with their baseline at caption_y (fraction of the height).
+    margin = round(H * (1 - st["neon_caption_y" if neon else "caption_y"]))
     if neon:
         # Black fill + thin light outline reads as hollow lettering; the glow is a blurred copy underneath.
         font, fill, highlight = st["neon_font"], "&H00000000&", style.ass_color(st["neon_highlight"])
         line = style.ass_color(st["neon_line"]).rstrip("&")
         styles = (
             f"Style: Caption,{font},{st['caption_size']},&H00000000,&H00000000,{line},&H00000000,"
-            "0,0,0,0,100,100,2,0,1,2,0,5,80,80,0,1\n"
+            f"0,0,0,0,100,100,2,0,1,2,0,2,80,80,{margin},1\n"
             f"Style: Quote,{font},{st['quote_size']},&H00000000,&H00000000,{line},&H00000000,"
             "0,0,0,0,100,100,1,0,1,2,0,8,90,90,240,1"
         )
@@ -100,7 +103,7 @@ def build_ass(words: list[dict], quote: str, author: str | None, duration: float
         font, fill, highlight, glow = st["font"], "&H00FFFFFF&", style.ass_color(st["highlight"]), ""
         styles = (
             f"Style: Caption,{font},{st['caption_size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
-            "-1,0,0,0,100,100,0,0,1,7,2,2,80,80,560,1\n"
+            f"-1,0,0,0,100,100,0,0,1,7,2,2,80,80,{margin},1\n"
             f"Style: Quote,{font},{st['quote_size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
             "-1,0,0,0,100,100,0,0,1,5,2,8,90,90,240,1"
         )
@@ -127,7 +130,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         events.append(f"Dialogue: {layer * 2 + 1},{_ts(start)},{_ts(end)},{name},,0,0,0,,{text}")
 
     quote_text = _esc(quote) + (f"\\N\\N- {_esc(author)}" if author else "")
-    event(1, 0, duration, "Quote", f"{{\\fad(300,300)}}{quote_text}")
+    fit = ""
+    if quote_fit:  # one line: no wrapping, font shrunk so ~0.6em per character fits the width
+        size = min(st["quote_size"], int((W - 180) / (0.6 * max(1, len(quote)))))
+        fit = f"\\q2\\fs{size}"
+    event(1, 0, duration, "Quote", f"{{\\fad(300,300){fit}}}{quote_text}")
     # Blackletter capitals are unreadable, so the neon look keeps the words as typed.
     case = (lambda w: w) if neon else str.upper
 
@@ -176,11 +183,47 @@ def _gradient_map(colors: list[str]) -> str:
     return f"format=gray,format=gbrp,lutrgb=r={channel(0)}:g={channel(1)}:b={channel(2)}"
 
 
+def _hook(src: str, dst: str, st: dict, duration: float) -> str:
+    """Attention grab on the first moments: glitch and/or shake. On footage it runs before the captions
+    so they stay crisp; on text clips after, so the hook text itself glitches."""
+    mode, a = st["hook"].lower(), st["hook_strength"]
+    d = round(min(st["hook_s"], duration / 3), 2)
+    if mode == "off" or d <= 0 or a <= 0:
+        return f"[{src}]null[{dst}]"
+    fx = []
+    if mode in ("shake", "both"):
+        amp = round(40 * a)
+        pad = amp + 8  # oversize by the max offset so the crop never leaves the frame
+        decay = f"max(0,1-t/{d})"
+        fx.append(
+            f"scale={W + 2 * pad}:{H + 2 * pad},crop={W}:{H}"
+            f":x='{pad}+{amp}*sin(97*t)*cos(41*t)*{decay}':y='{pad}+{amp}*cos(83*t)*sin(53*t)*{decay}'"
+        )
+    if mode in ("glitch", "both"):
+        # Random-looking 48px bands slide sideways, channels split, grain, one negative frame.
+        shift = f"{round(40 * a)}*gt(sin(floor(Y/48)*12.9898+N*78.233),0.6)*sin(N*1.7+floor(Y/48))"
+        fx += [
+            "format=gbrp",
+            f"geq=r='r(X+{shift},Y)':g='g(X+0.5*{shift},Y)':b='b(X-{shift},Y)'",
+            f"rgbashift=rh={-round(16 * a)}:bh={round(16 * a)}:enable='lt(mod(n,4),3)'",
+            f"noise=alls={round(20 * a)}:allf=t",
+            "negate=enable='eq(n,2)'",
+        ]
+    fx_chain = ",".join(fx)
+    return (
+        f"[{src}]split[hk_a][hk_b];"
+        f"[hk_a]trim=0:{d},setpts=PTS-STARTPTS,{fx_chain},format=yuv420p,setsar=1[hk_h];"
+        f"[hk_b]trim=start={d},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[hk_r];"
+        f"[hk_h][hk_r]concat=n=2:v=1:a=0[{dst}]"
+    )
+
+
 def video_filter(st: dict, duration: float) -> str:
     level = max(0, min(7, st["fractal"]))
+    hook = _hook("0:v", "hooked", st, duration)
     if level == 0:
-        return f"[0:v]{_ass()}[v]"
-    base = "[0:v]"
+        return f"{hook};[hooked]{_ass()}[v]"
+    base = "[hooked]"
     if level >= 5:
         base += MIRROR + ","
     if level >= 7:
@@ -191,7 +234,7 @@ def video_filter(st: dict, duration: float) -> str:
         f"[base][fr]blend=all_mode=screen:all_opacity={FRACTAL_OPACITY[level]}:shortest=1,"
         f"format=yuv420p,{_ass()}[v]"
     )
-    return ";".join([base, fractal, blend])
+    return ";".join([hook, base, fractal, blend])
 
 
 def finalize(joined: Path, ass: str, out: Path, st: dict, duration: float = 0) -> None:
@@ -223,6 +266,17 @@ def timed_words(text: str, pace: float) -> list[dict]:
 
 def card_duration(words: list[dict]) -> float:
     return round((words[-1]["end"] if words else 0) + TAIL_S, 2)
+
+
+def text_duration(card_s: float, st: dict) -> float:
+    """Card + at least fractal_s of fractal. With the bassline and loop_align, rounded up to end on a
+    whole loop (the note pattern padded to full 4-beat bars), so the clip loops cleanly on replay."""
+    total = card_s + st["fractal_s"]
+    if st["audio"].lower() == "bass" and st["loop_align"]:
+        beats = math.ceil(len(st["bass_notes"].split()) / 4) * 4
+        loop = beats * 60 / st["bpm"]
+        total = math.ceil(total / loop - 1e-6) * loop
+    return round(total, 2)
 
 
 def _card(d: float, st: dict) -> str:
@@ -297,7 +351,11 @@ def render_text(work: Path, ass: str, out: Path, card_s: float, duration: float,
         fractal += f",hue=H=2*PI*t/{st['hue_cycle_s']}"
     fractal += ",format=yuv420p[fr]"
     card = f"color=c=black:s={W}x{H}:r={FPS}:d={card_s},format=yuv420p[card]" if neon else _card(card_s, st)
-    graph = ";".join([card, fractal, f"[card][fr]concat=n=2:v=1:a=0,{_ass()}[v]", _audio(st, duration)])
+    graph = ";".join([
+        # Hook after the captions here: on a plain card, the text is the only thing to glitch.
+        card, fractal, f"[card][fr]concat=n=2:v=1:a=0,{_ass()}[cat]", _hook("cat", "v", st, duration),
+        _audio(st, duration),
+    ])
     media.run([
         "ffmpeg", "-y", "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",

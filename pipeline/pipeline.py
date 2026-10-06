@@ -73,7 +73,7 @@ def process(job: Path, notify: Notify = print) -> Path:
         duration = sum(s.end - s.start for s in plan.segments)
         words = render.remap_words([c["words"] for c in clip_data], plan.segments)
         st = style.load(job)
-        ass = render.build_ass(words, plan.quote, plan.quote_author, duration, st)
+        ass = render.build_ass(words, plan.quote, plan.quote_author, duration, st, quote_fit=plan.quote_fit)
         tmp = work / "final.tmp.mp4"
         render.finalize(joined, ass, tmp, st, duration=duration)
         tmp.rename(final)  # atomic: final.mp4 only exists when complete
@@ -95,7 +95,7 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
         st = style.load(job)
         words = render.timed_words((job / "text.txt").read_text(), st["pace"])
         card_s = render.card_duration(words)
-        duration = card_s + st["fractal_s"]
+        duration = render.text_duration(card_s, st)
         ass = render.build_ass(words, plan.quote, plan.quote_author, duration, st, look=st["look"])
         tmp = work / "final.tmp.mp4"
         render.render_text(work, ass, tmp, card_s, duration, st)

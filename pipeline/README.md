@@ -42,10 +42,14 @@ per 24h, so finish or discard drafts in the app.
 ## Use
 
 - Send a video (or an album of videos, combined in order). The caption is the quote,
-  used verbatim (`text | author` for attribution); leave it empty to use `content/quotes.txt`.
+  used verbatim (`text | author` for attribution). Leave it empty and the top line is a one-line
+  summary: the punchiest 3-9 word phrase said in the kept footage (no LLM); clips without speech
+  fall back to `content/quotes.txt`.
+- Every clip opens with a hook - glitch and/or shake for the first `hook_s` seconds (`hook`,
+  `hook_strength` in `style.toml`).
 - Send plain text instead of a video for a text-only clip: the text is the hook, shown word by
   word on a title card (`look`: `neon` - glowing blackletter on black, the default - or `pixel` -
-  yellow/blue pixel card), then a Mandelbrot zoom (`fractal_s`, default 5.5s) over a
+  yellow/blue pixel card), then a Mandelbrot zoom (at least `fractal_s`, stretched to end on a whole bass loop) over a
   generated bassline (A1, 60 bpm). Add a line `quote: ...` to set the quote; otherwise it comes from `content/quotes.txt`.
 - Style and effects - fonts, colours, caption sizes, fractal overlay level, zoom, mirror, hue
   cycling, audio (bassline / drone / off) - live in `content/style.toml` (edits apply to the next job). Override any key

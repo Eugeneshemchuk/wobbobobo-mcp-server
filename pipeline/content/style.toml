@@ -12,6 +12,12 @@ caption_size = 84          # word-by-word captions
 quote_size = 62            # quote at the top
 highlight = "#FFE500"      # current word
 words_per_line = 3
+caption_y = 0.78           # caption baseline, fraction of the height from the top (was 0.71)
+
+[hook]                     # attention grab on the first moments of every clip
+hook = "both"              # glitch | shake | both | off
+hook_s = 0.5               # seconds
+hook_strength = 1.0        # 0.5 subtle ... 2 wild
 
 [video]                    # uploaded footage
 fractal = 0                # Mandelbrot overlay 0 (off) - 7 (max); 5+ mirrors the footage, 7 adds hue cycling
@@ -21,13 +27,15 @@ overlay_zoom_end = 0.02
 [text]                     # text-only clips (no video)
 look = "neon"              # neon (black blackletter card, neon fractal) | pixel (yellow/blue pixel card)
 pace = 0.4                 # seconds per hook word
-fractal_s = 5.5            # seconds of fractal after the title card
+fractal_s = 4.5            # minimum seconds of fractal after the title card
+loop_align = true          # with the bassline: stretch to end on a whole bass loop (8s or 12s at 60 bpm)
 
 # neon look
 neon_font = "UnifrakturMaguntia"   # any font in content/fonts or the image; blackletter stays in mixed case
 neon_line = "#FFFFFF"      # outline of the hollow lettering
 neon_glow = "#8C3CFF"      # glow around the lettering
 neon_highlight = "#BEFF28" # fill of the current word
+neon_caption_y = 0.62      # hook baseline on the black card (was centred)
 glow = 10                  # glow blur, 0 = off
 neon_palette = "#000000 #3A0CA3 #8C3CFF #FF4FD8 #BEFF28"  # fractal recolour, dark -> bright
 bloom = 0.35               # soft glow on the fractal, 0 - 1

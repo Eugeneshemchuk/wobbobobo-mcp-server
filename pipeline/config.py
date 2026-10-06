@@ -36,5 +36,5 @@ TIKTOK_CLIENT_KEY = os.environ.get("TIKTOK_CLIENT_KEY", "")
 TIKTOK_CLIENT_SECRET = os.environ.get("TIKTOK_CLIENT_SECRET", "")
 TIKTOK_REDIRECT_URI = os.environ.get("TIKTOK_REDIRECT_URI", "")
 
-TARGET_MAX_S = float(os.environ.get("TARGET_MAX_S", "45"))
+TARGET_MAX_S = float(os.environ.get("TARGET_MAX_S", "30"))  # 15-30s suits one-idea talking clips
 # Style and effects (fonts, colours, fractal, drone...) live in content/style.toml.

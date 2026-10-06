@@ -11,7 +11,7 @@ import config
 FLAG = re.compile(r'(?<!\S)([a-z_]+)=(?:"([^"]*)"|(\S+))(?!\S)', re.IGNORECASE)
 HEX = re.compile(r"#[0-9a-fA-F]{6}")
 TRUE, FALSE = {"1", "true", "on", "yes"}, {"0", "false", "off", "no"}
-CHOICES = {"audio": {"bass", "drone", "off"}, "look": {"neon", "pixel"}}
+CHOICES = {"audio": {"bass", "drone", "off"}, "look": {"neon", "pixel"}, "hook": {"glitch", "shake", "both", "off"}}
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d)")
 SEMITONE = {"C": -9, "D": -7, "E": -5, "F": -4, "G": -2, "A": 0, "B": 2}
 
