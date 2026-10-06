@@ -148,7 +148,7 @@ def make_plan(clips: list[dict], user_quote: str | None, seed: str = "") -> Plan
         quote, quote_author = pick_quote(rng)
     tags = _lines("hashtags.txt")
     return Plan(
-        segments=pick_segments(clips),
+        segments=pick_segments(clips) if clips else [],  # no clips = text-only job
         quote=quote,
         quote_author=quote_author,
         tiktok_caption=rng.choice(_lines("captions.txt")),

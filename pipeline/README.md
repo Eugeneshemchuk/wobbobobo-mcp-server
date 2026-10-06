@@ -43,12 +43,17 @@ per 24h, so finish or discard drafts in the app.
 
 - Send a video (or an album of videos, combined in order). The caption is the quote,
   used verbatim (`text | author` for attribution); leave it empty to use `content/quotes.txt`.
-- Add `fractal=0..7` anywhere in the caption to set the fractal overlay for that video
-  (default `FRACTALITY` in `.env`; 5+ adds mirror symmetry, 7 adds hue cycling).
+- Send plain text instead of a video for a text-only clip: the text is the hook, shown word by
+  word on a yellow/blue title card, then a Mandelbrot zoom (`fractal_s`, default 5.5s) over a
+  generated drone. Add a line `quote: ...` to set the quote; otherwise it comes from `content/quotes.txt`.
+- Style and effects - fonts, colours, caption sizes, fractal overlay level, zoom, mirror, hue
+  cycling, drone - live in `content/style.toml` (edits apply to the next job). Override any key
+  for one job with `key=value` in the text or caption, e.g. `fractal=5` or `pace=0.3 hue_cycle_s=4`;
+  flags are stripped from the captions, and an unknown flag is rejected before anything is queued.
 - `/jobs` - recent jobs and status. `/retry <job_id>` - resume a failed job.
 - Run a job by hand: `python pipeline.py data/jobs/<id> [--publish]`.
 
 ## Not in the MVP
 
-TTS voiceover, background music + ducking, color normalization, smart reframing
+TTS voiceover (text-only clips use a generated drone), background music + ducking, color normalization, smart reframing
 (it center-crops), Approve/Regenerate buttons, performance tracking.

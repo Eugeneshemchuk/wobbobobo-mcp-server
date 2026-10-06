@@ -1,5 +1,9 @@
 """Telegram front door. Send one video (or an album of videos) with an optional
 caption = the quote. The bot renders it and drops it into your TikTok inbox.
+Or send plain text (no video): it becomes the hook on a title card, then a fractal zoom.
+Add a line "quote: ..." to set the quote; otherwise one comes from content/quotes.txt.
+key=value flags anywhere in the text or caption override content/style.toml for that job
+(e.g. "fractal=5", "pace=0.3 hue_cycle_s=4") and are stripped from the captions.
 
 Commands:
   /retry <job_id>   resume a failed job from the step that failed
@@ -19,10 +23,11 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import cleanup
 import config
 import pipeline
+import style
 
 log = logging.getLogger("bot")
 ALBUM_WAIT_S = 3.0
-FRACTAL_TAG = re.compile(r"\bfractal\s*=\s*([0-7])\b", re.IGNORECASE)
+QUOTE_LINE = re.compile(r"^\s*quote\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 
 queue: asyncio.Queue[Path] = asyncio.Queue()
 _albums: dict[str, list[Message]] = {}
@@ -36,18 +41,22 @@ def _new_job_dir() -> Path:
 
 
 async def _ingest(messages: list[Message], context: ContextTypes.DEFAULT_TYPE) -> None:
+    caption = next((m.caption for m in messages if m.caption), "") or ""
+    # Flags like "fractal=5" override content/style.toml for this job; the rest is the quote.
+    try:
+        caption, flags = style.extract_flags(caption)
+    except ValueError as e:
+        await messages[0].reply_text(f"{e}\nNothing queued - fix and resend.")
+        return
     job = _new_job_dir()
+    style.save_flags(job, flags)
     for i, m in enumerate(messages):
         media = m.video or m.document
         tg_file = await context.bot.get_file(media.file_id)
         await tg_file.download_to_drive(job / f"input_{i:02d}.mp4")
-    caption = next((m.caption for m in messages if m.caption), "") or ""
-    # Optional per-video setting in the caption, e.g. "fractal=5"; the rest is the quote.
-    if m := FRACTAL_TAG.search(caption):
-        (job / "fractality.txt").write_text(m.group(1))
-        caption = FRACTAL_TAG.sub("", caption)
-    if caption.strip():
-        (job / "quote.txt").write_text(caption.strip())
+    caption = re.sub(r"[ \t]{2,}", " ", caption).strip()  # gaps left by removed flags
+    if caption:
+        (job / "quote.txt").write_text(caption)
     (job / "status").write_text("ingested")
     await messages[0].reply_text(f"Job {job.name}: {len(messages)} clip(s), queued.")
     await queue.put(job)
@@ -67,6 +76,30 @@ async def on_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await asyncio.sleep(ALBUM_WAIT_S)
     msgs = sorted(_albums.pop(group), key=lambda m: m.message_id)
     await _ingest(msgs, context)
+
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    try:
+        text, flags = style.extract_flags(msg.text)
+    except ValueError as e:
+        await msg.reply_text(f"{e}\nNothing queued - fix and resend.")
+        return
+    quote = None
+    if m := QUOTE_LINE.search(text):
+        quote, text = m.group(1).strip(), QUOTE_LINE.sub("", text)
+    hook = " ".join(text.split())
+    if not hook:
+        await msg.reply_text("Send the hook text (plus an optional line 'quote: ...').")
+        return
+    job = _new_job_dir()
+    style.save_flags(job, flags)
+    (job / "text.txt").write_text(hook)
+    if quote:
+        (job / "quote.txt").write_text(quote)
+    (job / "status").write_text("ingested")
+    await msg.reply_text(f"Job {job.name}: text-only, queued.")
+    await queue.put(job)
 
 
 async def on_retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -168,6 +201,7 @@ def main() -> None:
 
     only_me = filters.Chat(chat_id=config.TELEGRAM_ALLOWED_CHAT_ID)
     app.add_handler(MessageHandler(only_me & (filters.VIDEO | filters.Document.VIDEO), on_video))
+    app.add_handler(MessageHandler(only_me & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(CommandHandler("retry", on_retry, filters=only_me))
     app.add_handler(CommandHandler("jobs", on_jobs, filters=only_me))
     app.run_polling()
