@@ -73,7 +73,7 @@ bass_notes = "A1"          # audio=bass only: one note per beat, loops; e.g. bas
 bpm = 60                   # audio=bass only; gen picks 72-104
 drone_hz = 110.0
 
-[voiceover]                # text and voice prompts read aloud by a macOS voice; captions follow the speech
+[voiceover]                # typed text read aloud by a macOS voice; voice messages keep your own voice
 voiceover = true           # needs tts_host.py running on the Mac
 voice = "Daniel"           # any name from `say -v '?'`; Premium voices sound far more natural
 voice_rate = 125           # say -r; 125 is 20% slower than the default 175 (say keeps pauses fixed, so not linear)

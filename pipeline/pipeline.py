@@ -5,7 +5,8 @@ jobs/<id>/
   input_00.mp4 ...      raw clips in upload order
   text.txt              text-only job instead of clips: hook card + fractal zoom, no footage
   voice.audio           voice message; transcribed into text.txt
-  work/voiceover.wav    text read by a macOS voice (tts_host.py); captions follow its timing
+  work/voiceover.wav    the voice track: your own voice message (trimmed, levelled), or for typed
+                        text a macOS voice (tts_host.py); captions follow its timing
   quote.txt             optional user-supplied quote
   flags.json            optional per-job overrides of content/style.toml (key=value flags)
   transcript.json       per-clip word timings
@@ -105,7 +106,12 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
         st = style.load(job)
         text = (job / "text.txt").read_text()
         voice = None
-        if st["voiceover"]:
+        if (job / "voice.audio").exists():  # a voice message keeps the sender's own voice
+            voice = work / "voiceover.wav"
+            if not voice.exists():
+                _clean_voice(job / "voice.audio", voice)
+            words = _spoken_words(text, voice, work)
+        elif st["voiceover"]:
             voice = work / "voiceover.wav"
             if not voice.exists():
                 notify("Recording voiceover...")
@@ -124,6 +130,17 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
         tmp.rename(final)
         _set_status(job, "rendered")
     return final
+
+
+def _clean_voice(src: Path, out: Path) -> None:
+    """Voice message -> voiceover: rumble cut, dead air trimmed at both ends, levelled to the
+    music bed's loudness so music_level means the same as with the macOS voice."""
+    trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.1"
+    media.run([
+        "ffmpeg", "-y", "-v", "error", "-i", str(src),
+        "-af", f"highpass=f=80,{trim},areverse,{trim},areverse,loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-ar", "48000", "-ac", "1", str(out),
+    ])
 
 
 def _spoken_words(text: str, voice: Path, work: Path) -> list[dict]:

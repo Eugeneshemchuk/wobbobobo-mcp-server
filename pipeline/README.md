@@ -48,8 +48,8 @@ per 24h, so finish or discard drafts in the app.
 - Every clip opens with a hook - glitch and/or shake for the first `hook_s` seconds (`hook`,
   `hook_strength` in `style.toml`).
 - Send plain text, or a voice message (transcribed locally), instead of a video for a text-only
-  clip. A macOS voice reads the text (`voiceover`, `voice`, `voice_rate`) and the captions follow the
-  speech word by word over the background (`look`: `drift` - the default, a Mandelbrot dive ported from
+  clip. A voice message keeps your own voice (trimmed and levelled); typed text is read by a macOS
+  voice (`voiceover`, `voice`, `voice_rate`). The captions follow the speech word by word over the background (`look`: `drift` - the default, a Mandelbrot dive ported from
   the Fractal Drift page with its styles and targets; `neon` - glowing blackletter card, then a neon
   fractal; `pixel` - yellow/blue pixel card). No quote on top unless you add a line `quote: ...`.
   Music is new per clip (`audio`): `ambient` - a meditative MIDI bed (pad drone, slow chords, bells,
