@@ -1,0 +1,44 @@
+# Style and effects. Edits apply to the next job - no rebuild needed.
+#
+# Any key below can be overridden for one job by putting key=value in the Telegram
+# text or video caption, e.g.:   Discipline is choosing what you want most. fractal_s=8 hue_cycle_s=4
+# Flags are stripped before rendering, so they never show up in the captions.
+# Values with spaces need quotes: font="Bebas Neue". On/off keys take on/off, yes/no, 1/0.
+# Sections are only for reading - flag names are the bare keys, so keep them unique.
+
+[captions]
+font = "DejaVu Sans"
+caption_size = 84          # word-by-word captions
+quote_size = 62            # quote at the top
+highlight = "#FFE500"      # current word
+words_per_line = 3
+
+[video]                    # uploaded footage
+fractal = 0                # Mandelbrot overlay 0 (off) - 7 (max); 5+ mirrors the footage, 7 adds hue cycling
+overlay_zoom_start = 3.0   # zoom over the clip: smaller = deeper
+overlay_zoom_end = 0.02
+
+[text]                     # text-only clips (no video)
+pace = 0.4                 # seconds per hook word
+fractal_s = 5.5            # seconds of fractal after the title card
+
+# title card
+card_left = "#FFFF00"
+card_right = "#0000FF"
+line = true                # rising diagonal line
+line_from = "#00FFFF"
+line_to = "#FF00FF"
+checker = true             # checker strip on the right edge
+checker_color = "#1E78C8"
+pixels = true              # blinking pixels top right
+
+# fractal
+zoom_start = 1.2           # smaller = deeper; the zoom drifts from start to end
+zoom_end = 0.6
+detail = 256               # max iterations: higher = finer edges, slower render
+mirror = false             # kaleidoscope symmetry
+hue_cycle_s = 0.0          # seconds per full colour cycle, 0 = off
+
+# audio
+drone = true               # off = silent track
+drone_hz = 110.0

@@ -36,6 +36,4 @@ TIKTOK_CLIENT_SECRET = os.environ.get("TIKTOK_CLIENT_SECRET", "")
 TIKTOK_REDIRECT_URI = os.environ.get("TIKTOK_REDIRECT_URI", "")
 
 TARGET_MAX_S = float(os.environ.get("TARGET_MAX_S", "45"))
-CAPTION_FONT = os.environ.get("CAPTION_FONT", "DejaVu Sans")
-# 0 = off ... 7 = full fractal trip. Per video: put fractal=N in the Telegram caption.
-FRACTALITY = int(os.environ.get("FRACTALITY") or 0)
+# Style and effects (fonts, colours, fractal, drone...) live in content/style.toml.
