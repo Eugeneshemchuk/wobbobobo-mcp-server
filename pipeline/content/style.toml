@@ -73,8 +73,12 @@ bass_notes = "A1"          # audio=bass only: one note per beat, loops; e.g. bas
 bpm = 60                   # audio=bass only; gen picks 72-104
 drone_hz = 110.0
 
-[voiceover]                # typed text read aloud by a macOS voice; voice messages keep your own voice
-voiceover = true           # needs tts_host.py running on the Mac
-voice = "Daniel"           # any name from `say -v '?'`; Premium voices sound far more natural
-voice_rate = 125           # say -r; 125 is 20% slower than the default 175 (say keeps pauses fixed, so not linear)
+[voiceover]                # typed text read aloud; voice messages keep your own voice
+voiceover = true
+tts = "kokoro"             # kokoro: open neural voice, runs in the worker | say: macOS voice via tts_host.py
+kokoro_voice = "am_michael"  # male: am_michael am_onyx am_fenrir am_adam am_eric am_liam am_echo am_puck,
+                           #   British bm_george bm_lewis bm_daniel bm_fable; female: af_heart af_bella bf_emma ...
+kokoro_speed = 0.8         # 1 = normal; 0.8 = 20% slower
+voice = "Daniel"           # tts=say only: any name from `say -v '?'`
+voice_rate = 125           # tts=say only: say -r; 125 is 20% slower than its default 175
 music_level = 0.25         # music volume under the voice, 0 - 1

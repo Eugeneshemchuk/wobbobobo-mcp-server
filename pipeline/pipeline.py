@@ -6,7 +6,7 @@ jobs/<id>/
   text.txt              text-only job instead of clips: hook card + fractal zoom, no footage
   voice.audio           voice message; transcribed into text.txt
   work/voiceover.wav    the voice track: your own voice message (trimmed, levelled), or for typed
-                        text a macOS voice (tts_host.py); captions follow its timing
+                        text a Kokoro or macOS voice (tts.py); captions follow its timing
   quote.txt             optional user-supplied quote
   flags.json            optional per-job overrides of content/style.toml (key=value flags)
   transcript.json       per-clip word timings
@@ -115,7 +115,7 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
             voice = work / "voiceover.wav"
             if not voice.exists():
                 notify("Recording voiceover...")
-                tts.speak(text, voice, st["voice"], st["voice_rate"])
+                tts.speak(text, voice, st)
             words = _spoken_words(text, voice, work)
         else:
             words = render.timed_words(text, st["pace"])

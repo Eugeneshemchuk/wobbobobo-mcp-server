@@ -16,6 +16,7 @@ CHOICES = {
     "drift_style": {"classic", "midnight", "ocean", "ember", "neon", "topo"},
     "drift_target": {"seahorse", "elephant", "bulb"},
     "drift_quality": {"fast", "full"},
+    "tts": {"kokoro", "say"},
 }
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d)")
 SEMITONE = {"C": -9, "D": -7, "E": -5, "F": -4, "G": -2, "A": 0, "B": 2}
