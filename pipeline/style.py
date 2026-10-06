@@ -11,7 +11,14 @@ import config
 FLAG = re.compile(r'(?<!\S)([a-z_]+)=(?:"([^"]*)"|(\S+))(?!\S)', re.IGNORECASE)
 HEX = re.compile(r"#[0-9a-fA-F]{6}")
 TRUE, FALSE = {"1", "true", "on", "yes"}, {"0", "false", "off", "no"}
-CHOICES = {"audio": {"bass", "drone", "off"}, "look": {"neon", "pixel"}, "hook": {"glitch", "shake", "both", "off"}}
+CHOICES = {
+    "audio": {"ambient", "gen", "bass", "drone", "off"}, "look": {"neon", "pixel", "drift"}, "hook": {"glitch", "shake", "both", "off"},
+    "drift_style": {"random", "classic", "midnight", "ocean", "ember", "neon", "topo"},
+    "drift_target": {"random", "seahorse", "elephant", "bulb", "seahorse spiral", "tendrils", "classic spiral",
+                     "top spiral", "elephant spirals", "needle spiral", "star"},
+    "drift_quality": {"fast", "full"},
+    "tts": {"kokoro", "say"},
+}
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d)")
 SEMITONE = {"C": -9, "D": -7, "E": -5, "F": -4, "G": -2, "A": 0, "B": 2}
 

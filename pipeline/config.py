@@ -37,4 +37,7 @@ TIKTOK_CLIENT_SECRET = os.environ.get("TIKTOK_CLIENT_SECRET", "")
 TIKTOK_REDIRECT_URI = os.environ.get("TIKTOK_REDIRECT_URI", "")
 
 TARGET_MAX_S = float(os.environ.get("TARGET_MAX_S", "30"))  # 15-30s suits one-idea talking clips
+
+# Voiceover service on the macOS host (tts_host.py); Docker resolves host.docker.internal to the Mac.
+TTS_URL = os.environ.get("TTS_URL", "http://host.docker.internal:8765").rstrip("/")
 # Style and effects (fonts, colours, fractal, drone...) live in content/style.toml.

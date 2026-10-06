@@ -47,12 +47,19 @@ per 24h, so finish or discard drafts in the app.
   fall back to `content/quotes.txt`.
 - Every clip opens with a hook - glitch and/or shake for the first `hook_s` seconds (`hook`,
   `hook_strength` in `style.toml`).
-- Send plain text instead of a video for a text-only clip: the text is the hook, shown word by
-  word on a title card (`look`: `neon` - glowing blackletter on black, the default - or `pixel` -
-  yellow/blue pixel card), then a Mandelbrot zoom (at least `fractal_s`, stretched to end on a whole bass loop) over a
-  generated bassline (A1, 60 bpm). Add a line `quote: ...` to set the quote; otherwise it comes from `content/quotes.txt`.
+- Send plain text, or a voice message (transcribed locally), instead of a video for a text-only
+  clip. A voice message keeps your own voice (trimmed and levelled); typed text is read by Kokoro,
+  an open neural voice running in the worker (`kokoro_voice`, `kokoro_speed`). The captions follow the speech word by word over the background (`look`: `drift` - the default, a Mandelbrot dive ported from
+  the Fractal Drift page with its styles and targets; `neon` - glowing blackletter card, then a neon
+  fractal; `pixel` - yellow/blue pixel card). No quote on top unless you add a line `quote: ...`.
+  Music is new per clip (`audio`): `ambient` - a meditative MIDI bed (pad drone, slow chords, bells,
+  binaural sub) rendered with FluidSynth, the default - or `gen` (synth bassline + arpeggio), `bass`,
+  `drone`, `off`. TikTok flagged the identical bassline the earlier clips all shared.
+- Kokoro (Apache 2.0) downloads ~350MB into `data/models/kokoro` on first use. `tts=say` uses a
+  macOS voice instead, which runs on the Mac, not in Docker: keep `python3 tts_host.py` running
+  (stdlib, 127.0.0.1:8765; reached at `TTS_URL`, default `http://host.docker.internal:8765`).
 - Style and effects - fonts, colours, caption sizes, fractal overlay level, zoom, mirror, hue
-  cycling, audio (bassline / drone / off) - live in `content/style.toml` (edits apply to the next job). Override any key
+  cycling, audio, voiceover - live in `content/style.toml` (edits apply to the next job). Override any key
   for one job with `key=value` in the text or caption, e.g. `fractal=5` or `pace=0.3 hue_cycle_s=4`;
   flags are stripped from the captions, and an unknown flag is rejected before anything is queued.
 - Logs: `data/bot.log` - one line per event (queued with kind and flags, each step, render time
@@ -63,5 +70,5 @@ per 24h, so finish or discard drafts in the app.
 
 ## Not in the MVP
 
-TTS voiceover (text-only clips use a generated bassline), background music + ducking, color normalization, smart reframing
+Voiceover and music on video clips, ducking, color normalization, smart reframing
 (it center-crops), Approve/Regenerate buttons, performance tracking.

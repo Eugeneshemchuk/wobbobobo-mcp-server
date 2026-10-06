@@ -4,6 +4,9 @@ so re-running a failed job resumes where it stopped.
 jobs/<id>/
   input_00.mp4 ...      raw clips in upload order
   text.txt              text-only job instead of clips: hook card + fractal zoom, no footage
+  voice.audio           voice message; transcribed into text.txt
+  work/voiceover.wav    the voice track: your own voice message (trimmed, levelled), or for typed
+                        text a Kokoro or macOS voice (tts.py); captions follow its timing
   quote.txt             optional user-supplied quote
   flags.json            optional per-job overrides of content/style.toml (key=value flags)
   transcript.json       per-clip word timings
@@ -25,6 +28,7 @@ import media
 import render
 import style
 import tiktok
+import tts
 from plan import Plan, make_plan
 from transcribe import transcribe
 
@@ -44,6 +48,14 @@ def process(job: Path, notify: Notify = print) -> Path:
     """Everything up to final.mp4."""
     work = job / "work"
     work.mkdir(exist_ok=True)
+    voice = job / "voice.audio"
+    if voice.exists() and not (job / "text.txt").exists():
+        notify("Transcribing voice...")
+        text = " ".join(w["w"] for w in transcribe(voice, work)).strip()
+        if not text:
+            raise RuntimeError("no speech found in the voice message")
+        (job / "text.txt").write_text(text)
+        _set_status(job, "transcribed")
     if (job / "text.txt").exists():
         return _process_text(job, work, notify)
     clips = sorted(job.glob("input_*.mp4"))
@@ -84,24 +96,63 @@ def process(job: Path, notify: Notify = print) -> Path:
 def _process_text(job: Path, work: Path, notify: Notify) -> Path:
     pf = job / "plan.json"
     if not pf.exists():
-        notify("Picking quote...")
+        notify("Planning...")
         pf.write_text(make_plan([], _user_quote(job), seed=job.name).model_dump_json(indent=2))
         _set_status(job, "planned")
     plan = Plan.model_validate_json(pf.read_text())
 
     final = job / "final.mp4"
     if not final.exists():
-        notify("Rendering fractal...")
         st = style.load(job)
-        words = render.timed_words((job / "text.txt").read_text(), st["pace"])
+        text = (job / "text.txt").read_text()
+        voice = None
+        if (job / "voice.audio").exists():  # a voice message keeps the sender's own voice
+            voice = work / "voiceover.wav"
+            if not voice.exists():
+                _clean_voice(job / "voice.audio", voice)
+            words = _spoken_words(text, voice, work)
+        elif st["voiceover"]:
+            voice = work / "voiceover.wav"
+            if not voice.exists():
+                notify("Recording voiceover...")
+                tts.speak(text, voice, st)
+            words = _spoken_words(text, voice, work)
+        else:
+            words = render.timed_words(text, st["pace"])
+        notify("Rendering fractal...")
         card_s = render.card_duration(words)
-        duration = render.text_duration(card_s, st)
-        ass = render.build_ass(words, plan.quote, plan.quote_author, duration, st, look=st["look"])
+        duration = render.text_duration(card_s, st, job.name)
+        # Text clips show only a quote the user asked for ("quote: ..."), not one from quotes.txt.
+        quote = plan.quote if _user_quote(job) else ""
+        ass = render.build_ass(words, quote, plan.quote_author, duration, st, look=st["look"])
         tmp = work / "final.tmp.mp4"
-        render.render_text(work, ass, tmp, card_s, duration, st)
+        render.render_text(work, ass, tmp, card_s, duration, st, voice)
         tmp.rename(final)
         _set_status(job, "rendered")
     return final
+
+
+def _clean_voice(src: Path, out: Path) -> None:
+    """Voice message -> voiceover: rumble cut, dead air trimmed at both ends, levelled to the
+    music bed's loudness so music_level means the same as with the macOS voice."""
+    trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.1"
+    media.run([
+        "ffmpeg", "-y", "-v", "error", "-i", str(src),
+        "-af", f"highpass=f=80,{trim},areverse,{trim},areverse,loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-ar", "48000", "-ac", "1", str(out),
+    ])
+
+
+def _spoken_words(text: str, voice: Path, work: Path) -> list[dict]:
+    """Caption timings from the voiceover itself, shifted by the lead-in it is mixed at. Whisper's
+    timings with the typed words when the counts line up, so captions keep the user's spelling."""
+    heard = transcribe(voice, work)
+    typed = text.split()
+    if len(heard) == len(typed):
+        heard = [{**h, "w": t} for h, t in zip(heard, typed)]
+    if not heard:
+        raise RuntimeError("voiceover came back silent - check the voice name (voice=...)")
+    return [{**h, "start": h["start"] + render.LEAD_S, "end": h["end"] + render.LEAD_S} for h in heard]
 
 
 def publish(job: Path, notify: Notify = print) -> dict:

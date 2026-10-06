@@ -25,10 +25,12 @@ overlay_zoom_start = 3.0   # zoom over the clip: smaller = deeper
 overlay_zoom_end = 0.02
 
 [text]                     # text-only clips (no video)
-look = "neon"              # neon (black blackletter card, neon fractal) | pixel (yellow/blue pixel card)
-pace = 0.4                 # seconds per hook word
+look = "drift"             # neon (black blackletter card, neon fractal) | pixel (yellow/blue pixel card)
+                           # | drift (hook text over a Fractal Drift dive from the first frame)
+pace = 0.4                 # seconds per hook word (without voiceover; with it, the voice sets the pace)
 fractal_s = 4.5            # minimum seconds of fractal after the title card
 loop_align = true          # with the bassline: stretch to end on a whole bass loop (8s or 12s at 60 bpm)
+max_mb = 10.0              # final file size cap for text and voice clips; the bitrate follows from the length
 
 # neon look
 neon_font = "UnifrakturMaguntia"   # any font in content/fonts or the image; blackletter stays in mixed case
@@ -50,15 +52,35 @@ checker = true             # checker strip on the right edge
 checker_color = "#1E78C8"
 pixels = true              # blinking pixels top right
 
-# fractal
+# drift look - the Fractal Drift page (eugeneshemchuk.github.io/Portfolio/fractal)
+drift_style = "random"     # random (a new look per clip: a preset or a generated palette, with spin, density,
+                           #   framing and colour drift varied) | classic | midnight | ocean | ember | neon | topo
+drift_target = "random"    # random (one of the detail-rich ones) | seahorse | elephant | bulb | "seahorse spiral"
+                           #   | tendrils | "classic spiral" | "top spiral" | "elephant spirals" | "needle spiral" | star
+drift_speed = 0.8          # motion pace - zoom, spin, glide, colour drift; 1 = ~500x zoom in 12s, 0 = still
+drift_quality = "fast"     # fast: anti-aliased keyframes, no warp | full: every frame computed, exact, no AA
+
+# fractal (neon and pixel looks)
 zoom_start = 1.2           # smaller = deeper; the zoom drifts from start to end
 zoom_end = 0.6
 detail = 256               # max iterations: higher = finer edges, slower render
 mirror = false             # kaleidoscope symmetry
 hue_cycle_s = 0.0          # seconds per full colour cycle, 0 = off
 
-# audio - one synth (sine + fifth + octave), played as a bassline or a held drone
-audio = "bass"             # bass | drone | off
-bass_notes = "A1"          # one note per beat, loops; e.g. bass_notes="A1 A1 C2 G1"
-bpm = 60
+# audio - a new track per clip by default: TikTok flagged the same bassline on every upload
+audio = "ambient"          # ambient: meditative MIDI bed - pad drone, slow chords, bells, reverb, binaural sub
+                           # | gen: synth bassline + arpeggio | bass: bass_notes | drone | off
+sub_level = 0.15           # ambient: deep sine sub under the bed, 0 = off
+bass_notes = "A1"          # audio=bass only: one note per beat, loops; e.g. bass_notes="A1 A1 C2 G1"
+bpm = 60                   # audio=bass only; gen picks 72-104
 drone_hz = 110.0
+
+[voiceover]                # typed text read aloud; voice messages keep your own voice
+voiceover = true
+tts = "kokoro"             # kokoro: open neural voice, runs in the worker | say: macOS voice via tts_host.py
+kokoro_voice = "am_onyx"     # male: am_onyx am_michael am_fenrir am_adam am_eric am_liam am_echo am_puck,
+                           #   British bm_george bm_lewis bm_daniel bm_fable; female: af_heart af_bella bf_emma ...
+kokoro_speed = 0.8         # 1 = normal; 0.8 = 20% slower
+voice = "Daniel"           # tts=say only: any name from `say -v '?'`
+voice_rate = 125           # tts=say only: say -r; 125 is 20% slower than its default 175
+music_level = 0.25         # music volume under the voice, 0 - 1
