@@ -95,6 +95,7 @@ def pick(style_name: str, target_name: str, seed: str) -> tuple[dict, str, str]:
         spin=rng.choice([-1, 1]) * rng.uniform(0.008, 0.03), density=rng.uniform(0.8, 1.6),
         cycle=rng.choice([0, 0, 0.03, 0.06]), magnify=rng.uniform(1.5, 2.5),
     )
+    st["warp_phase"] = rng.uniform(0, 2 * math.pi)  # where the warp starts its slow circle
     colours = " ".join(c for _, c in st["gradient"]) if st["gradient"] else "site palette"
     return st, target, f"{name} ({colours}) on {target}, spin {st['spin']:+.3f}, density {st['density']:.2f}"
 
@@ -151,9 +152,11 @@ def _view(sec: float, total: float, st: dict, target: tuple, zoom_end: float) ->
     zoom = math.exp(math.log(zoom_end) * sec / total) * st["base"]
     sec *= st["speed"]  # the rest of the motion runs on scaled time too
     glide = math.exp(-GLIDE * sec)
-    f = (math.log(zoom) - math.log(WARP_FADE[0])) / math.log(WARP_FADE[1] / WARP_FADE[0])
-    f = min(max(f, 0), 1)
-    warp = st["warp"] * (1 - f * f * (3 - 2 * f))
+    warp, fade = st["warp"], st.get("warp_fade", WARP_FADE)
+    if fade:  # None: the warp holds at every zoom
+        f = min(max((math.log(zoom) - math.log(fade[0])) / math.log(fade[1] / fade[0]), 0), 1)
+        warp *= 1 - f * f * (3 - 2 * f)
+    wa = st.get("warp_phase", 0.0) + st["warp_speed"] * min(sec, st.get("warp_hold", math.inf))
     return dict(
         zoom=zoom,
         # Clamped so the target starts on screen: on a portrait frame the page's full offset puts
@@ -162,7 +165,7 @@ def _view(sec: float, total: float, st: dict, target: tuple, zoom_end: float) ->
         sy=max(-GLIDE_MAX[1], min(GLIDE_MAX[1], (target[1] - OVERVIEW[1]) / 2.6 * st["magnify"])) * glide,
         angle=st["spin"] * sec,
         max_iter=_max_iter(zoom),
-        z0=complex(warp * math.cos(st["warp_speed"] * sec), warp * math.sin(st["warp_speed"] * sec)),
+        z0=complex(warp * math.cos(wa), warp * math.sin(wa)),
     )
 
 
@@ -362,26 +365,83 @@ def _keyframes(key_dir: Path, w: int, h: int, fps: int, seconds: float, st: dict
     return meta
 
 
+WARP_CIRCLE = 4.0  # a held warp circles while the zoom is under this x the opening, then holds still
+
+
+def _warp_target(st: dict, target: tuple, zoom_end: float) -> tuple:
+    """A warped set's edge is not where the plain set's is, so diving at the named target can end in
+    flat colour. Re-aim at the warped edge, refining 4x at a time down to the deepest zoom: at each
+    level take the edge pixel (slow escape, or touching the inside) nearest the current aim."""
+    z0 = _view(1e9, 1e9, {**st, "base": 1}, target, 1.0)["z0"]  # the warp once it holds still
+    c0, n, zoom = complex(*target), 64, st["base"]
+    while True:
+        px = 2.6 / zoom / n
+        ys, xs = np.mgrid[0:n, 0:n]
+        c = c0 + ((xs - n / 2) + 1j * (n / 2 - ys)) * px
+        sm = _iterate(c.ravel(), z0, _max_iter(zoom * 8), zoom * 8).reshape(n, n)
+        esc = sm[sm >= 0]
+        if esc.size:
+            inside = sm < 0
+            near_inside = np.zeros_like(inside)
+            near_inside[1:-1, 1:-1] = inside[:-2, 1:-1] | inside[2:, 1:-1] | inside[1:-1, :-2] | inside[1:-1, 2:]
+            edge = (sm >= 0) & (near_inside | (sm >= np.percentile(esc, 95)))
+            iy, ix = np.nonzero(edge)
+            if iy.size:
+                k = np.argmin((ix - n / 2) ** 2 + (iy - n / 2) ** 2)
+                c0 = c[iy[k], ix[k]]
+        if zoom >= st["base"] * zoom_end:
+            return (c0.real, c0.imag)
+        zoom = min(zoom * 4, st["base"] * zoom_end)
+
+
 def _start_zoom(st: dict, target: tuple) -> float:
     """The page opens on the whole set, which on a portrait frame is mostly the black inside of the
     set - a weak first second. Probe a coarse frame at doubling zooms and open on the first one where
     under a quarter of the picture is inside the set."""
+    warped = st["warp"] > 0 and not st.get("warp_fade", WARP_FADE)
+    best, best_edges = 64, -1.0
     for start in (1, 2, 4, 8, 16, 32, 64):
         v = _view(0, 1, {**st, "base": st["magnify"] * start}, target, 1.0)
         c = complex(*target) + _offsets(54, 96, v)
-        if (_iterate(c.ravel(), 0j, v["max_iter"], v["zoom"]) < 0).mean() < 0.25:
-            return start
-    return 64
+        sm = _iterate(c.ravel(), v["z0"] if warped else 0j, v["max_iter"], v["zoom"]).reshape(96, 54)
+        if not warped:
+            if (sm < 0).mean() < 0.25:
+                return start
+            continue
+        # A warped set can open on flat colour: also want filament (neighbours differing a lot).
+        edges = (np.abs(np.diff(sm, axis=1)) > 2).mean()
+        if (sm < 0).mean() < 0.4:
+            if edges > 0.15:
+                return start
+            if edges > best_edges:
+                best, best_edges = start, edges
+    return best
 
 
 def render(out: Path, w: int, h: int, fps: int, seconds: float, style: dict, target: str,
-           speed: float = 1.0, quality: str = "fast") -> None:
+           speed: float = 1.0, quality: str = "fast", spin: float = 0.0, warp: float = 0.0,
+           warp_speed: float = 0.05) -> None:
     """Near-lossless intermediate at w x h (ultrafast: x264 would otherwise eat the cores the frames
-    need); the caller upscales and burns captions. style and target come from pick()."""
+    need); the caller upscales and burns captions. style and target come from pick().
+    spin > 0 sets the rotation rate (direction from the style); warp > 0 bends the set by that much,
+    circling slowly at warp_speed, held at every zoom - which needs every frame computed (full)."""
     # speed scales every motion - zoom, spin, glide, colour cycling, warp; 0 = a still frame.
     st, tgt = {**style, "speed": max(speed, 0.0)}, TARGETS[target]
+    if spin > 0:
+        st["spin"] = math.copysign(spin, st["spin"] or 1)
+    if warp > 0:
+        # bright: the dark glow floor (midnight) turns a warped set nearly black.
+        st.update(warp=warp, warp_speed=warp_speed, warp_fade=None, bright=True)
+        if not st["gradient"]:  # midnight's soft site palette washes out under warp: same blues, more contrast
+            st["gradient"] = STYLES["ocean"]["gradient"]
+        quality = "full"
     st["base"] = st["magnify"] * _start_zoom(st, tgt)  # opening zoom; glide still uses magnify
     zoom_end = min(math.exp(ZOOM_RATE * st["speed"] * seconds), 1e11)  # float64 limit
+    if st["warp"] > 0 and not st.get("warp_fade", WARP_FADE):
+        # Circle while shallow, then hold, so the edge being dived into stays put.
+        hold = seconds * math.log(WARP_CIRCLE) / math.log(zoom_end) if zoom_end > WARP_CIRCLE else seconds
+        st["warp_hold"] = hold * st["speed"]
+        tgt = _warp_target(st, tgt, zoom_end)
     frames = max(1, round(seconds * fps))
     key_dir = out.parent / "drift_keys"
     ff = subprocess.Popen(

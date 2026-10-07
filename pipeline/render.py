@@ -446,7 +446,7 @@ def _render_drift(work: Path, out: Path, duration: float, st: dict, voice: Path 
         look, target, label = drift.pick(st["drift_style"].lower(), st["drift_target"].lower(), work.parent.name)
         log.info("%s drift: %s", work.parent.name, label)
         drift.render(tmp, W // 2, H // 2, FPS, duration, look, target, st["drift_speed"],
-                     st["drift_quality"].lower())
+                     st["drift_quality"].lower(), st["drift_spin"], st["drift_warp"], st["drift_warp_speed"])
         tmp.rename(bg)
     inputs, labels = _sound_inputs(work, st, duration, voice, first=1)
     graph = ";".join([

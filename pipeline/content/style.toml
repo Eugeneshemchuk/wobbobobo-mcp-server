@@ -57,7 +57,10 @@ drift_style = "random"     # random (a new look per clip: a preset or a generate
                            #   framing and colour drift varied) | classic | midnight | ocean | ember | neon | topo
 drift_target = "random"    # random (one of the detail-rich ones) | seahorse | elephant | bulb | "seahorse spiral"
                            #   | tendrils | "classic spiral" | "top spiral" | "elephant spirals" | "needle spiral" | star
-drift_speed = 0.8          # motion pace - zoom, spin, glide, colour drift; 1 = ~500x zoom in 12s, 0 = still
+drift_speed = 0.5          # motion pace - zoom, spin, glide, colour drift; 1 = ~500x zoom in 12s, 0 = still (was 0.8)
+drift_spin = 0.15          # rotation rate (direction varies per clip); 0 = the style's own gentle spin
+drift_warp = 0.27          # bends the set itself, 0 - 0.5; 0 = off. Warp forces drift_quality=full
+drift_warp_speed = 0.05    # how fast the warp circles: low = slow morph
 drift_quality = "fast"     # fast: anti-aliased keyframes, no warp | full: every frame computed, exact, no AA
 
 # fractal (neon and pixel looks)

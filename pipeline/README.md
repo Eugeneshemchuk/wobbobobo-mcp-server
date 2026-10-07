@@ -55,6 +55,10 @@ per 24h, so finish or discard drafts in the app.
   Music is new per clip (`audio`): `ambient` - a meditative MIDI bed (pad drone, slow chords, bells,
   binaural sub) rendered with FluidSynth, the default - or `gen` (synth bassline + arpeggio), `bass`,
   `drone`, `off`. TikTok flagged the identical bassline the earlier clips all shared.
+- The drift dive runs at `drift_speed` 0.5 with a visible spin (`drift_spin`) and a 27% warp of the set
+  (`drift_warp`, circling slowly at `drift_warp_speed` while the zoom is shallow, then held). Warp needs every
+  frame computed, so it renders in full quality; the dive is re-aimed at the warped set's edge so it never
+  ends on flat colour. `drift_warp=0` gives the old anti-aliased keyframe dive.
 - Kokoro (Apache 2.0) downloads ~350MB into `data/models/kokoro` on first use. `tts=say` uses a
   macOS voice instead, which runs on the Mac, not in Docker: keep `python3 tts_host.py` running
   (stdlib, 127.0.0.1:8765; reached at `TTS_URL`, default `http://host.docker.internal:8765`).
