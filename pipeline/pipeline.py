@@ -20,6 +20,7 @@ Run one job by hand: python pipeline.py data/jobs/<id>
 """
 
 import json
+import random
 import sys
 from pathlib import Path
 from typing import Callable
@@ -105,6 +106,8 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
     if not final.exists():
         st = style.load(job)
         text = (job / "text.txt").read_text()
+        if text.strip().lower() == "fractal":
+            return _process_fractal(job, work, st, notify)
         voice = None
         if (job / "voice.audio").exists():  # a voice message keeps the sender's own voice
             voice = work / "voiceover.wav"
@@ -129,6 +132,22 @@ def _process_text(job: Path, work: Path, notify: Notify) -> Path:
         render.render_text(work, ass, tmp, card_s, duration, st, voice)
         tmp.rename(final)
         _set_status(job, "rendered")
+    return final
+
+
+FRACTAL_S = (14.0, 20.0)  # length range of a bare "fractal" clip
+
+
+def _process_fractal(job: Path, work: Path, st: dict, notify: Notify) -> Path:
+    """The bare word "fractal": no words, no voice - a random mix of fractal scenes over the music."""
+    final = job / "final.mp4"
+    notify("Rendering fractal mix...")
+    duration = round(random.Random(job.name).uniform(*FRACTAL_S), 1)
+    ass = render.build_ass([], "", None, duration, st, look="drift")
+    tmp = work / "final.tmp.mp4"
+    render.render_text(work, ass, tmp, 0, duration, st, None, mode="fractal")
+    tmp.rename(final)
+    _set_status(job, "rendered")
     return final
 
 

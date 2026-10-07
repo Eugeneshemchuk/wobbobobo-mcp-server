@@ -59,6 +59,9 @@ drift_target = "random"    # random (one of the detail-rich ones) | seahorse | e
                            #   | tendrils | "classic spiral" | "top spiral" | "elephant spirals" | "needle spiral" | star
 drift_speed = 0.8          # motion pace - zoom, spin, glide, colour drift; 1 = ~500x zoom in 12s, 0 = still
 drift_quality = "fast"     # fast: anti-aliased keyframes, no warp | full: every frame computed, exact, no AA
+drift_mix = true           # a random cut of 1-4 scenes per clip (dives, slow warped spins, Julia morphs, some
+                           #   mirrored) with random transitions; off = one dive. Send just "fractal" for a
+                           #   wordless 14-20s mix of 4-6 scenes, half of them slow 27%-warp rotations
 
 # fractal (neon and pixel looks)
 zoom_start = 1.2           # smaller = deeper; the zoom drifts from start to end

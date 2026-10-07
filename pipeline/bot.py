@@ -1,6 +1,7 @@
 """Telegram front door. Send one video (or an album of videos) with an optional
 caption = the quote. The bot renders it and drops it into your TikTok inbox.
 Or send plain text (no video): it is read aloud as the hook over a fractal background.
+Send just the word "fractal" for a wordless mix of random fractal scenes over music.
 Add a line "quote: ..." to show a quote on top. Or send a voice message: it is transcribed and
 used as the hook text (flags go in its caption).
 key=value flags anywhere in the text or caption override content/style.toml for that job
@@ -104,7 +105,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if quote:
         (job / "quote.txt").write_text(quote)
     (job / "status").write_text("ingested")
-    await msg.reply_text(f"Job {job.name}: text-only, queued.")
+    kind = "fractal mix" if hook.lower() == "fractal" else "text-only"
+    await msg.reply_text(f"Job {job.name}: {kind}, queued.")
     log.info("%s queued: text words=%d quote=%s flags=%s", job.name, len(hook.split()), bool(quote), flags or "-")
     await queue.put(job)
 

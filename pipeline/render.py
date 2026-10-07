@@ -438,15 +438,23 @@ def _sound_inputs(work: Path, st: dict, duration: float, voice: Path | None, fir
     return [a for f in files for a in ("-i", f.name)], labels
 
 
-def _render_drift(work: Path, out: Path, duration: float, st: dict, voice: Path | None) -> None:
-    """The hook text over a Fractal Drift dive from the first frame - no separate card."""
+def _render_drift(work: Path, out: Path, duration: float, st: dict, voice: Path | None, mode: str = "text") -> None:
+    """The hook text over Fractal Drift from the first frame - no separate card. A random mix of
+    scenes (drift.plan_scenes), or with drift_mix=off one dive; mode=fractal is always a mix."""
     bg = work / "drift.mp4"
     if not bg.exists():  # the slow part; kept so a failed encode can resume
         tmp = work / "drift.tmp.mp4"
-        look, target, label = drift.pick(st["drift_style"].lower(), st["drift_target"].lower(), work.parent.name)
-        log.info("%s drift: %s", work.parent.name, label)
-        drift.render(tmp, W // 2, H // 2, FPS, duration, look, target, st["drift_speed"],
-                     st["drift_quality"].lower())
+        style_name, target, job = st["drift_style"].lower(), st["drift_target"].lower(), work.parent.name
+        if st["drift_mix"] or mode == "fractal":
+            scenes = drift.plan_scenes(job, mode, duration, FPS, style_name, target, st["drift_speed"])
+            for sc in scenes:
+                log.info("%s scene: %s -> %s", job, sc["label"], sc["transition"])
+            drift.render_sequence(tmp, W // 2, H // 2, FPS, scenes, st["drift_quality"].lower())
+        else:
+            look, target, label = drift.pick(style_name, target, job)
+            log.info("%s drift: %s", job, label)
+            drift.render(tmp, W // 2, H // 2, FPS, duration, look, target, st["drift_speed"],
+                         st["drift_quality"].lower())
         tmp.rename(bg)
     inputs, labels = _sound_inputs(work, st, duration, voice, first=1)
     graph = ";".join([
@@ -459,12 +467,13 @@ def _render_drift(work: Path, out: Path, duration: float, st: dict, voice: Path 
 
 
 def render_text(work: Path, ass: str, out: Path, card_s: float, duration: float, st: dict,
-                voice: Path | None = None) -> None:
-    """voice: voiceover file in work/, mixed over the music from LEAD_S."""
+                voice: Path | None = None, mode: str = "text") -> None:
+    """voice: voiceover file in work/, mixed over the music from LEAD_S. mode=fractal: a pure fractal
+    clip (no words), always the drift look."""
     fractal_s = round(duration - card_s, 2)
     (work / "captions.ass").write_text(ass, encoding="utf-8")
-    if st["look"].lower() == "drift":
-        _render_drift(work, out, duration, st, voice)
+    if st["look"].lower() == "drift" or mode == "fractal":
+        _render_drift(work, out, duration, st, voice, mode)
         return
     neon = st["look"] == "neon"
     fractal = _mandelbrot(fractal_s, st["zoom_start"], st["zoom_end"], st["detail"], "black" if neon else "mincol")

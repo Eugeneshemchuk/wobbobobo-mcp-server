@@ -55,6 +55,10 @@ per 24h, so finish or discard drafts in the app.
   Music is new per clip (`audio`): `ambient` - a meditative MIDI bed (pad drone, slow chords, bells,
   binaural sub) rendered with FluidSynth, the default - or `gen` (synth bassline + arpeggio), `bass`,
   `drone`, `off`. TikTok flagged the identical bassline the earlier clips all shared.
+- Text and voice clips cut 1-4 random scenes together (`drift_mix`, default on): dives, slow warped spins,
+  Julia sets morphing along the cardioid edge, some mirrored, joined with random transitions. Send just
+  `fractal` for a wordless 14-20s mix of 4-6 scenes, about half of them slow rotations through a
+  27%-warped set. Everything is seeded by the job id, so `/retry` renders the same clip.
 - Kokoro (Apache 2.0) downloads ~350MB into `data/models/kokoro` on first use. `tts=say` uses a
   macOS voice instead, which runs on the Mac, not in Docker: keep `python3 tts_host.py` running
   (stdlib, 127.0.0.1:8765; reached at `TTS_URL`, default `http://host.docker.internal:8765`).
