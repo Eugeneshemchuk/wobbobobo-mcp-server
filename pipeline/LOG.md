@@ -54,15 +54,11 @@
 - `models/`: 815 MB in total.
   - Whisper: about 464 MB
   - Kokoro: 348 MB, downloaded by hand
-- Leftover test folders from earlier sessions, about 340 MB:
-  - `basstest`, `fixtest`, `fractaltest`, `hooktest`, `neontest`, `styletest`, `texttest`
-  - `ref`
-  - the debug `*.png` files
+- `ref/`: 30 MB of reference material (`IMG_5071.MOV` and style sheets). No code uses it. Kept for now.
 
 **Known gaps / open items**
 - Cleanup doesn't prune the bot's `voice/` and `music/` download folders.
 - Kokoro's first-use auto-download hasn't been tested, because the model was downloaded by hand.
 - Rendering a longer clip takes much longer than a short one: 24.5 s took 108 s, against about 38 s for 11-16 s.
-- `dev` isn't pushed.
 - `tts_host.py` can be stopped if `say` is no longer wanted.
 - The leftover test folders in `data/` can be deleted.
