@@ -3,7 +3,6 @@ dive into a boundary "river" with slow spin, smooth colouring and the site's sty
 of the page's shader, one process per frame, piped to ffmpeg. float64 is good to ~1e12x zoom.
 """
 
-import cmath
 import colorsys
 import math
 import os
@@ -152,11 +151,9 @@ def _view(sec: float, total: float, st: dict, target: tuple, zoom_end: float) ->
     zoom = math.exp(math.log(zoom_end) * sec / total) * st["base"]
     sec *= st["speed"]  # the rest of the motion runs on scaled time too
     glide = math.exp(-GLIDE * sec)
-    warp, fade = st["warp"], st.get("warp_fade", WARP_FADE)
-    if fade:  # None: warp holds at any zoom (sequence warp scenes open deep in a river)
-        f = min(max((math.log(zoom) - math.log(fade[0])) / math.log(fade[1] / fade[0]), 0), 1)
-        warp *= 1 - f * f * (3 - 2 * f)
-    wa = st.get("warp_phase", 0.0) + st["warp_speed"] * sec
+    f = (math.log(zoom) - math.log(WARP_FADE[0])) / math.log(WARP_FADE[1] / WARP_FADE[0])
+    f = min(max(f, 0), 1)
+    warp = st["warp"] * (1 - f * f * (3 - 2 * f))
     return dict(
         zoom=zoom,
         # Clamped so the target starts on screen: on a portrait frame the page's full offset puts
@@ -165,7 +162,7 @@ def _view(sec: float, total: float, st: dict, target: tuple, zoom_end: float) ->
         sy=max(-GLIDE_MAX[1], min(GLIDE_MAX[1], (target[1] - OVERVIEW[1]) / 2.6 * st["magnify"])) * glide,
         angle=st["spin"] * sec,
         max_iter=_max_iter(zoom),
-        z0=complex(warp * math.cos(wa), warp * math.sin(wa)),
+        z0=complex(warp * math.cos(st["warp_speed"] * sec), warp * math.sin(st["warp_speed"] * sec)),
     )
 
 
@@ -183,16 +180,13 @@ def _offsets(w: int, h: int, v: dict, xs=None, ys=None) -> np.ndarray:
     return ((cs * dx - sn * dy) + 1j * (sn * dx + cs * dy)) * (2.6 / v["zoom"])
 
 
-def _iterate(c, z0, max_iter: int, zoom: float) -> np.ndarray:
-    """Smooth escape count per point (float32), -1 where the point never escaped. Mandelbrot: c per
-    pixel, z0 one start point (the warp). Julia: z0 per pixel, c one constant."""
-    mandel = np.ndim(z0) == 0
-    c, z0 = np.broadcast_arrays(np.asarray(c, dtype=np.complex128), np.asarray(z0, dtype=np.complex128))
+def _iterate(c: np.ndarray, z0: complex, max_iter: int, zoom: float) -> np.ndarray:
+    """Smooth escape count per point (float32), -1 where the point never escaped."""
     n = np.zeros(c.shape)
     zfin = np.zeros(c.shape, dtype=np.complex128)
     esc = np.zeros(c.shape, dtype=bool)
     todo = np.ones(c.shape, dtype=bool)
-    if mandel and z0.flat[0] == 0:  # main cardioid and period-2 bulb never escape: skip their max_iter run (unwarped set only)
+    if z0 == 0:  # main cardioid and period-2 bulb never escape: skip their max_iter run (unwarped set only)
         x, y = c.real, c.imag
         q = (x - 0.25) ** 2 + y * y
         todo = ~((q * (q + x - 0.25) <= 0.25 * y * y) | ((x + 1) ** 2 + y * y <= 1 / 16))
@@ -203,7 +197,7 @@ def _iterate(c, z0, max_iter: int, zoom: float) -> np.ndarray:
     ctype, rtype = (np.complex64, np.float32) if zoom < 3000 else (np.complex128, np.float64)
     idx = np.flatnonzero(todo)
     cc = c[idx].astype(ctype)
-    zc = z0[idx].astype(ctype)
+    zc = np.full(idx.size, z0, dtype=ctype)
     alive = np.ones(idx.size, dtype=bool)
     r2, tmp, out = np.empty(idx.size, rtype), np.empty(idx.size, rtype), np.empty(idx.size, bool)
     parked = 0
@@ -278,7 +272,7 @@ SUBPIXELS = ((-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25))
 BLEND_FROM = 0.75  # last quarter of each zoom octave fades into the next keyframe, so detail never pops
 STRIP = 64  # keyframe rows per task
 
-_keys: dict = {}  # per worker process: (keyframe dir, index) -> memory-mapped escape counts
+_keys: dict = {}  # per worker process: keyframe index -> memory-mapped escape counts
 
 
 def _key_strip(args) -> np.ndarray:
@@ -321,9 +315,9 @@ def _key_frame(args) -> bytes:
     for dx, dy in SUBPIXELS:
         off = _offsets(w, h, v, xs + dx, ys + dy).ravel()
         for key, wt in mix:
-            if (key_dir, key) not in _keys:
-                _keys[key_dir, key] = np.load(key_dir / f"k{key}.npy", mmap_mode="r")
-            t, e = _sample(_keys[key_dir, key], meta[key]["px"], off)
+            if key not in _keys:
+                _keys[key] = np.load(key_dir / f"k{key}.npy", mmap_mode="r")
+            t, e = _sample(_keys[key], meta[key]["px"], off)
             sm_sum, esc_sum = sm_sum + wt * t, esc_sum + wt * e
     esc_sum = esc_sum / len(SUBPIXELS)
     sm = sm_sum / len(SUBPIXELS) / np.maximum(esc_sum, 1e-6)
@@ -380,176 +374,36 @@ def _start_zoom(st: dict, target: tuple) -> float:
     return 64
 
 
-def _encoder(out: Path, w: int, h: int, fps: int, vf: str | None = None) -> subprocess.Popen:
-    """Near-lossless intermediate (ultrafast: x264 would otherwise eat the cores the frames need)."""
-    return subprocess.Popen(
-        ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps),
-         "-i", "-", *(["-vf", vf] if vf else []), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10",
-         "-pix_fmt", "yuv444p", str(out)],
-        stdin=subprocess.PIPE,
-    )
-
-
-def _pipe(out: Path, w: int, h: int, fps: int, bufs, vf: str | None = None) -> None:
-    ff = _encoder(out, w, h, fps, vf)
-    try:
-        for buf in bufs:
-            ff.stdin.write(buf)
-    finally:
-        ff.stdin.close()
-        if ff.wait() != 0:
-            raise RuntimeError(f"ffmpeg failed encoding {out.name}")
-
-
-def _dive(pool, w: int, h: int, fps: int, seconds: float, st: dict, target: str, quality: str, key_dir: Path):
-    """Frames of one dive. st needs speed; base (opening zoom) is set here."""
-    tgt = TARGETS[target]
+def render(out: Path, w: int, h: int, fps: int, seconds: float, style: dict, target: str,
+           speed: float = 1.0, quality: str = "fast") -> None:
+    """Near-lossless intermediate at w x h (ultrafast: x264 would otherwise eat the cores the frames
+    need); the caller upscales and burns captions. style and target come from pick()."""
+    # speed scales every motion - zoom, spin, glide, colour cycling, warp; 0 = a still frame.
+    st, tgt = {**style, "speed": max(speed, 0.0)}, TARGETS[target]
     st["base"] = st["magnify"] * _start_zoom(st, tgt)  # opening zoom; glide still uses magnify
     zoom_end = min(math.exp(ZOOM_RATE * st["speed"] * seconds), 1e11)  # float64 limit
     frames = max(1, round(seconds * fps))
-    if quality == "full":
-        jobs = ((w, h, i / fps, seconds, st, tgt, zoom_end) for i in range(frames))
-        yield from pool.imap(_frame, jobs, chunksize=2)
-        return
-    key_dir.mkdir(exist_ok=True)
-    meta = _keyframes(key_dir, w, h, fps, seconds, st, tgt, zoom_end, frames, pool)
-    jobs = ((w, h, i / fps, seconds, st, tgt, zoom_end, key_dir, meta) for i in range(frames))
-    yield from pool.imap(_key_frame, jobs, chunksize=4)
-
-
-def render(out: Path, w: int, h: int, fps: int, seconds: float, style: dict, target: str,
-           speed: float = 1.0, quality: str = "fast") -> None:
-    """One dive at w x h; the caller upscales and burns captions. style and target come from pick()."""
-    # speed scales every motion - zoom, spin, glide, colour cycling, warp; 0 = a still frame.
-    st = {**style, "speed": max(speed, 0.0)}
     key_dir = out.parent / "drift_keys"
-    # spawn, not fork: the bot calls this from a worker thread, and forking a threaded process is unsafe.
+    ff = subprocess.Popen(
+        ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps),
+         "-i", "-", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-pix_fmt", "yuv444p", str(out)],
+        stdin=subprocess.PIPE,
+    )
     try:
+        # spawn, not fork: the bot calls this from a worker thread, and forking a threaded process is unsafe.
         with multiprocessing.get_context("spawn").Pool(os.cpu_count() or 4) as pool:
-            _pipe(out, w, h, fps, _dive(pool, w, h, fps, seconds, st, target, quality, key_dir))
+            if quality == "full":
+                jobs = ((w, h, i / fps, seconds, st, tgt, zoom_end) for i in range(frames))
+                bufs = pool.imap(_frame, jobs, chunksize=2)
+            else:
+                key_dir.mkdir(exist_ok=True)
+                meta = _keyframes(key_dir, w, h, fps, seconds, st, tgt, zoom_end, frames, pool)
+                jobs = ((w, h, i / fps, seconds, st, tgt, zoom_end, key_dir, meta) for i in range(frames))
+                bufs = pool.imap(_key_frame, jobs, chunksize=4)
+            for buf in bufs:
+                ff.stdin.write(buf)
     finally:
+        ff.stdin.close()
         shutil.rmtree(key_dir, ignore_errors=True)
-
-
-# --- Sequences: several random scenes cut together ---------------------------------------------
-# mode "fractal" (the bare word "fractal" sent to the bot): 4-6 scenes, about half of them slow
-# rotations through a 27%-warped set with the warp drifting slowly, the rest any kind. mode "text"
-# (text and voice clips): 1-4 scenes of any kind to fit the captions. Every frame costs well under
-# 0.1s on one core at 540x960, so the mix stays as cheap as a single dive.
-# Kinds: dive (the classic zoom), warp (per-frame, warped set, slow spin), julia (a Julia set whose c
-# walks just outside the main cardioid's edge: spirals and dust that keep reshaping, zoom-free).
-TRANSITIONS = ["fade", "dissolve", "circleopen", "circleclose", "radial", "pixelize", "smoothup", "smoothleft",
-               "hblur", "zoomin", "fadewhite", "diagtl", "squeezeh", "wiperight"]
-JULIA_ITER = 160
-MIRROR_VF = "crop=iw/2:ih:0:0,split[l][r];[r]hflip[rf];[l][rf]hstack"  # kaleidoscope: left half + its mirror
-
-
-def _warp_start(st: dict, names: list[str]) -> tuple[str, float]:
-    """A river and opening zoom where the warped set is detailed: a little of the inside showing,
-    lots of slow-escaping filament. Shallow zooms are mostly the set's black inside."""
-    for name in names:
-        for base in (6, 10, 16, 24, 36):
-            v = _view(0, 1, {**st, "base": base}, TARGETS[name], 1.0)
-            sm = _iterate((complex(*TARGETS[name]) + _offsets(54, 96, v)).ravel(), v["z0"], v["max_iter"], v["zoom"])
-            grid = sm.reshape(96, 54)
-            edges = (np.abs(np.diff(grid, axis=1)) > 2).mean()  # filament, not flat gradient
-            if 0.03 < (grid < 0).mean() < 0.4 and edges > 0.15:
-                return name, base
-    return "star", 20
-
-
-def plan_scenes(seed: str, mode: str, total: float, fps: int, style_name: str = "random",
-                target_name: str = "random", speed: float = 0.8) -> list[dict]:
-    """Scenes for a clip of `total` seconds, all drawn from the job id so a retry renders the same clip.
-    Durations are in frames; neighbours overlap by `fade` frames for the transition."""
-    rng = random.Random(f"seq:{seed}:{mode}")
-    wild = mode == "fractal"
-    n = rng.randint(4, 6) if wild else max(1, min(4, round(total / rng.uniform(4, 6))))
-    fade = round(rng.uniform(0.5, 0.9) * fps) if n > 1 else 0
-    span = round(total * fps) + (n - 1) * fade
-    wts = [rng.uniform(0.7, 1.3) for _ in range(n)]
-    frames = [round(span * w / sum(wts)) for w in wts[:-1]]
-    frames.append(span - sum(frames))
-    kinds = ["warp" if wild and i % 2 == rng.randint(0, 1) else rng.choice(["dive", "dive", "julia", "warp"])
-             for i in range(n)]
-    targets = RANDOM_TARGETS if target_name == "random" else [target_name]
-    scenes = []
-    for i, (kind, nf) in enumerate(zip(kinds, frames)):
-        st, target, label = pick(style_name, target_name, f"{seed}:{i}")
-        if wild and style_name == "random" and rng.random() < 0.5:  # even more fresh palettes
-            st["gradient"], st["bright"] = _random_gradient(rng), True
-            label = "generated palette, " + label.split(" on ")[-1]
-        st["speed"] = speed * rng.uniform(0.6, 1.5 if wild else 1.3)
-        st["cycle"] = rng.choice([0, 0.03, 0.06, 0.12] if wild else [0, 0, 0.03, 0.06])
-        sc = dict(kind=kind, frames=nf, fade=fade, style=st, target=target,
-                  transition=rng.choice(TRANSITIONS), mirror=kind != "julia" and rng.random() < (0.3 if wild else 0.15))
-        if kind == "warp":
-            # Slow, rotating, warped: the set itself bends while the camera turns.
-            st.update(warp=0.27 if wild else rng.uniform(0.12, 0.35), warp_speed=rng.uniform(0.03, 0.07),
-                      warp_phase=rng.uniform(0, 2 * math.pi), warp_fade=None, speed=rng.uniform(0.2, 0.4),
-                      spin=rng.choice([-1, 1]) * rng.uniform(0.3, 0.6))
-            sc["target"], st["base"] = _warp_start(st, rng.sample(targets, len(targets)))
-            label = f"warp {st['warp']:.2f} on {sc['target']} at {st['base']}x, spin {st['spin']:+.2f}"
-        elif kind == "julia":
-            sc.update(scale=rng.uniform(1.01, 1.04), theta=rng.uniform(0, 2 * math.pi),
-                      theta_rate=rng.choice([-1, 1]) * rng.uniform(0.06, 0.15), zoom=rng.uniform(1.0, 1.6),
-                      zoom_rate=rng.uniform(0, 0.05))
-            st["spin"] = rng.choice([-1, 1]) * rng.uniform(0.05, 0.2)
-            label = f"julia walk from {sc['theta']:.2f} rad, scale {sc['scale']:.3f}"
-        sc["label"] = f"{kind} {nf / fps:.1f}s: {label}" + (", mirrored" if sc["mirror"] else "")
-        scenes.append(sc)
-    return scenes
-
-
-def _julia_frame(args) -> bytes:
-    w, h, sec, sc = args
-    st = sc["style"]
-    t = sec * st["speed"]
-    e = cmath.exp(1j * (sc["theta"] + sc["theta_rate"] * t))
-    c = sc["scale"] * (e / 2 - e * e / 4)  # main cardioid edge, pushed slightly outside
-    v = dict(zoom=sc["zoom"] * math.exp(sc["zoom_rate"] * t), sx=0.0, sy=0.0, angle=st["spin"] * t)
-    sm = _iterate(c, _offsets(w, h, v).ravel(), JULIA_ITER, 1.0)
-    return _colour(sm, sm >= 0, w, h, st, sec, JULIA_ITER)
-
-
-def _scene_frames(pool, w: int, h: int, fps: int, sc: dict, quality: str, key_dir: Path):
-    st, seconds = sc["style"], sc["frames"] / fps
-    if sc["kind"] == "dive":
-        return _dive(pool, w, h, fps, seconds, st, sc["target"], quality, key_dir)
-    if sc["kind"] == "julia":
-        return pool.imap(_julia_frame, ((w, h, i / fps, sc) for i in range(sc["frames"])), chunksize=4)
-    zoom_end = math.exp(ZOOM_RATE * st["speed"] * seconds)
-    tgt = TARGETS[sc["target"]]
-    return pool.imap(_frame, ((w, h, i / fps, seconds, st, tgt, zoom_end) for i in range(sc["frames"])), chunksize=4)
-
-
-def render_sequence(out: Path, w: int, h: int, fps: int, scenes: list[dict], quality: str = "fast") -> None:
-    """Each scene to its own intermediate, then joined with each scene's transition into the next."""
-    tmp = out.parent / "drift_scenes"
-    tmp.mkdir(exist_ok=True)
-    try:
-        files = []
-        with multiprocessing.get_context("spawn").Pool(os.cpu_count() or 4) as pool:
-            for i, sc in enumerate(scenes):
-                f = tmp / f"s{i}.mp4"
-                _pipe(f, w, h, fps, _scene_frames(pool, w, h, fps, sc, quality, tmp / f"k{i}"),
-                      MIRROR_VF if sc["mirror"] else None)
-                files.append(f)
-        if len(files) == 1:
-            shutil.move(files[0], out)
-            return
-        chain, prev, at = [], "0:v", 0
-        for i in range(1, len(files)):
-            at += scenes[i - 1]["frames"] - scenes[i]["fade"]
-            label = f"x{i}"
-            chain.append(f"[{prev}][{i}:v]xfade=transition={scenes[i - 1]['transition']}"
-                         f":duration={scenes[i]['fade'] / fps:.4f}:offset={at / fps:.4f}[{label}]")
-            prev = label
-        cmd = ["ffmpeg", "-y", "-v", "error"]
-        for f in files:
-            cmd += ["-i", str(f)]
-        cmd += ["-filter_complex", ";".join(chain), "-map", f"[{prev}]", "-c:v", "libx264", "-preset", "ultrafast",
-                "-crf", "10", "-pix_fmt", "yuv444p", str(out)]
-        subprocess.run(cmd, check=True)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if ff.wait() != 0:
+            raise RuntimeError(f"ffmpeg failed encoding {out.name}")
